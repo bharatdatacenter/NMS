@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+         stopOnFailure="false">
+    <testsuites>
+        <testsuite name="unit">
+            <directory>tests/unit</directory>
+        </testsuite>
+        <testsuite name="integration">
+            <directory>tests/integration</directory>
+        </testsuite>
+        <testsuite name="api">
+            <directory>tests/api</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>core</directory>
+            <directory>api</directory>
+            <directory>vendors</directory>
+            <directory>services</directory>
+        </include>
+    </source>
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <env name="MONGODB_DATABASE" value="nms_test"/>
+        <env name="REDIS_DB" value="15"/>
+    </php>
+</phpunit>

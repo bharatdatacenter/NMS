@@ -1,0 +1,47 @@
+{
+    "name": "nms/network-management-system",
+    "description": "Network Management System - unified control over multi-vendor network infrastructure",
+    "type": "project",
+    "require": {
+        "php": ">=8.3",
+        "mongodb/mongodb": "^1.18",
+        "firebase/php-jwt": "^6.10",
+        "predis/predis": "^2.2",
+        "monolog/monolog": "^3.7"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "NMS\\": "src/",
+            "NMS\\Core\\": "core/",
+            "NMS\\Vendors\\": "vendors/",
+            "NMS\\Services\\": "services/"
+        },
+        "files": [
+            "core/helpers/Response.php",
+            "core/helpers/Validator.php",
+            "core/helpers/IPUtils.php",
+            "core/helpers/RetryHandler.php",
+            "core/helpers/CircuitBreaker.php",
+            "core/helpers/Logger.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "NMS\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "test:unit": "phpunit --testsuite unit",
+        "test:integration": "phpunit --testsuite integration",
+        "db:migrate": "php database/setup.php"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "minimum-stability": "stable"
+}
