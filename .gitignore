@@ -1,1 +1,7 @@
 *.vtt
+vendor/
+.env
+storage/
+*.log
+.phpunit.result.cache
+storage/secrets.enc.json

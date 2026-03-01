@@ -60,32 +60,33 @@ Network infrastructure is inherently hierarchical and graph-like. A data center 
 | **Cache / Broker** | Redis 7.0+ (required) | JWT blocklist, rate limiting, Zabbix data cache (60s TTL), device status cache, idempotency key store |
 | **Secrets** | HashiCorp Vault (or provider abstraction) | Device credentials, HMAC signing keys, VPN PSKs. Fallback: app-layer encryption with OS keyring key (temporary) |
 | **Authentication** | JWT (HS256 → future RS256) | Shared with IMS via API. Key stored in Vault, not .env |
-| **Authorization** | Role-Based Access Control (RBAC) | 50+ permissions |
+| **Authorization** | RBAC (shared with IMS) | Permissions validated via JWT claims. IMS owns users/roles/permissions — no RBAC DB in NMS |
 | **API Architecture** | RESTful JSON API | Standardized responses, `X-Idempotency-Key` on mutating provisioning endpoints |
 | **Design Pattern** | MVC with Service Layer | Clean separation |
 | **Monitoring** | Zabbix API | External monitoring integration (read-only from NMS) |
 | **Resilience** | Exponential Backoff + Circuit Breaker | All vendor API calls: base 2s, max 30s, jitter. Circuit breaker per device after 5 consecutive failures |
-| **Frontend** | React.js / Vue.js | Modern SPA |
-| **Visualization** | D3.js / Vis.js / Three.js | Network topology + 3D rack views |
+| **Frontend** | PHP Templates + Tailwind CSS + Alpine.js | Server-rendered views, no separate SPA build. Alpine.js for lightweight reactivity |
+| **Visualization** | D3.js / Cytoscape.js / Three.js | Network topology (Cytoscape.js), 3D rack views (Three.js), charts (Chart.js) |
 | **PHP MongoDB Driver** | mongodb/mongodb (Composer) | Official MongoDB PHP library |
+| **Ticketing** | Shared IMS Ticket System | NMS creates/updates tickets in IMS via M2M API — no separate ticketing in NMS |
 
 ---
 
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
+┌─────────────────────────────────────────────────────────────��───────────────┐
 │                                FRONTEND                                      │
 │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐    │
 │  │ Dashboard │ │ Topology  │ │   IPAM    │ │  Devices  │ │   Drift   │    │
 │  │           │ │ (3D Sites)│ │           │ │ +Clusters │ │  Manager  │    │
 │  └───────────┘ └───────────┘ └───────────┘ └───────────┘ └───────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────���────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            NMS API LAYER                                     │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  ┌───────────────��─────────────────────────────────────────────────────┐    │
 │  │                      api/api.php (Router)                            │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │  ┌──────────┬──────────┬──────────┬──────────┬──────────┬──────────┐       │
@@ -101,7 +102,7 @@ Network infrastructure is inherently hierarchical and graph-like. A data center 
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          CORE SERVICE LAYER                                  │
-│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐                │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────��                │
 │  │ Device Manager │  │  IPAM Service  │  │Firewall Service│                │
 │  └────────────────┘  └────────────────┘  └────────────────┘                │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐                │
@@ -121,7 +122,7 @@ Network infrastructure is inherently hierarchical and graph-like. A data center 
               ▼                     ▼                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                      VENDOR ADAPTER LAYER                                    │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐         │
+│  ┌──────────┐ ┌─────────���┐ ┌──────────┐ ┌──────────┐ ┌──────────┐         │
 │  │ MikroTik │ │ FortiGate│ │   VyOS   │ │  Cisco   │ │  Aruba   │         │
 │  │ Adapter  │ │ Adapter  │ │ Adapter  │ │ Adapter  │ │ Adapter  │         │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘         │
@@ -1315,6 +1316,69 @@ Pre-Provisioning Conflict Check:
     first_seen: ISODate,
     last_seen: ISODate
 }
+
+// ─── server_nics collection ───
+// NMS owns the NETWORK context of each NIC (not the physical hardware — that's IMS).
+// Synced from IMS on server.nic_change webhook. One document per physical NIC interface.
+{
+    _id: ObjectId,
+    ims_server_id: "ims-server-uuid-123",       // IMS server UUID (foreign key to IMS)
+    server_name: "web-server-01",               // Denormalised for queries
+    nic_name: "eth0",                           // Interface name as seen by OS
+    mac_address: "AA:BB:CC:11:22:33",          // Synced from IMS
+    nic_index: 0,                               // Physical NIC slot index (from IMS)
+
+    // Network connectivity (owned by NMS)
+    connected_to: {
+        device_id: ObjectId,                    // Switch or patch panel this NIC plugs into
+        device_name: "Core-SW-01",
+        port_name: "ge-0/0/15",
+        cable_id: ObjectId                      // Cable in NMS cables collection
+    },
+
+    // L2 network config
+    vlan_id: 100,
+    vlan_name: "management",
+    access_mode: "access",                      // access | trunk
+
+    // L3 IP assignments (references ip_assignments collection)
+    ip_assignments: [
+        {
+            assignment_id: ObjectId,
+            ip_address: "10.0.1.50",
+            ip_version: "ipv4",
+            prefix_length: 24,
+            gateway: "10.0.1.1",
+            assignment_type: "l2"               // l2 | l3
+        },
+        {
+            assignment_id: ObjectId,
+            ip_address: "2001:db8::50",
+            ip_version: "ipv6",
+            prefix_length: 64,
+            gateway: "2001:db8::1",
+            assignment_type: "l2"
+        }
+    ],
+
+    // Bonding / LAG
+    is_bond_member: false,
+    bond_master: null,                          // NIC name of bond master if applicable
+
+    status: "active",                           // active | down | unknown
+    last_synced: ISODate,                       // When NMS last confirmed via IMS webhook
+    created_at: ISODate,
+    updated_at: ISODate
+}
+```
+
+**NIC indexes:**
+```javascript
+db.server_nics.createIndex({ "ims_server_id": 1 });
+db.server_nics.createIndex({ "mac_address": 1 }, { unique: true });
+db.server_nics.createIndex({ "connected_to.device_id": 1 });
+db.server_nics.createIndex({ "connected_to.cable_id": 1 });
+db.server_nics.createIndex({ "vlan_id": 1 });
 ```
 
 ---
@@ -2150,12 +2214,16 @@ This is the complete hardware-to-network picture that neither system provides al
 | Aspect | Owner |
 |--------|-------|
 | Server hardware, BIOS, OS, builds | IMS |
-| NIC inventory, MAC addresses | IMS (shared with NMS) |
+| NIC physical inventory (model, PCI slot, bond config) | IMS |
+| NIC MAC addresses | IMS (synced to NMS on `server.nic_change` event) |
+| NIC network context (switch port, VLAN, IP assignment, cable) | NMS (`server_nics` collection) |
 | Rack placement, U-position | IMS (synced to NMS) |
 | Network identity: IPs, routes, firewall rules | NMS |
 | Cable tracking, port-to-port connections | NMS |
 | Topology visualization | NMS |
 | Monitoring / alerting | Zabbix (queried by both) |
+| Ticketing / work queue | IMS (NMS creates tickets via M2M API) |
+| Users, roles, permissions | IMS (NMS reads JWT claims only) |
 
 ### 11.2 Bidirectional Webhook Events
 
@@ -2225,8 +2293,60 @@ Request: { "datacenter": "DC1", "ipv4_l2": 1, "ipv4_l3": 5, "ipv6_l2": 1, "ipv6_
 ```
 GET  {IMS_URL}/api/server/{server_id}                    - Verify server exists
 PUT  {IMS_URL}/api/server/{server_id}/network            - Update server network info
-GET  {IMS_URL}/api/server/{server_id}/hardware/nic       - Get NIC/MAC info
+GET  {IMS_URL}/api/server/{server_id}/hardware/nic       - Get NIC/MAC info (list all NICs)
 POST {IMS_URL}/api/webhooks/nms                          - Send NMS events to IMS
+
+// Ticketing (NMS → IMS via M2M)
+POST {IMS_URL}/api/tickets                              - Create NMS ticket in IMS system
+PUT  {IMS_URL}/api/tickets/{ticket_id}                  - Update ticket (resolve, comment, close)
+GET  {IMS_URL}/api/tickets/{ticket_id}                  - Read ticket state
+```
+
+### 11.4 Shared Ticketing System
+
+NMS does **not** have its own ticketing system. All human-actionable items are created as tickets in the IMS ticket system via M2M API calls. Engineers work from a single queue.
+
+**NMS Ticket Types (registered in IMS):**
+
+| NMS Event | IMS Ticket Type | Trigger | Auto-close Trigger |
+|-----------|-----------------|---------|-------------------|
+| Provisioning step needs human action | `nms_intervention` | Manual intervention queue item created | Operator marks step complete in NMS |
+| Drift detected, resolution needs approval | `nms_drift` | Drift detected with `requires_approval: true` | Drift resolved or dismissed |
+| Provisioning saga failed (unrecoverable) | `nms_provision_failure` | All compensation steps exhausted | Operator manually resolves |
+| Device unreachable for >15 min | `nms_device_unreachable` | Circuit breaker open + health check failing | Device comes back online |
+
+**Ticket creation (M2M call from NMS):**
+
+```json
+POST {IMS_URL}/api/tickets
+{
+    "type": "nms_intervention",
+    "title": "Provisioning step requires manual action: web-server-01",
+    "body": "Step 4 (firewall policy push) failed after 3 retries on DC1-FW-Cluster-01. Manual intervention required.",
+    "priority": "high",
+    "source_system": "nms",
+    "source_ref": {
+        "job_id": "prov-job-uuid",
+        "step": 4,
+        "device_id": "fw-cluster-uuid"
+    },
+    "assigned_group": "network-ops"
+}
+```
+
+**Manual intervention queue in NMS:** The `manual_intervention_queue` collection stores the job context and step data. The `ims_ticket_id` field links back to the IMS ticket so status is bidirectional.
+
+```javascript
+// manual_intervention_queue document (updated with IMS ticket reference)
+{
+    job_id: ObjectId("..."),
+    step: 4,
+    device_id: ObjectId("..."),
+    reason: "firewall policy push failed",
+    ims_ticket_id: "ticket-uuid",    // <-- link to IMS ticket
+    status: "awaiting_operator",
+    created_at: ISODate("...")
+}
 ```
 
 ---
@@ -2305,11 +2425,26 @@ NMS → IMS (webhook event):
   3. IMS validates aud == "ims-m2m"
 ```
 
-### 12.5 RBAC Permission Model
+### 12.5 RBAC — Shared with IMS
+
+**Architecture:** IMS is the single source of truth for all users, roles, and permissions across both systems. NMS does **not** maintain its own users/roles database. At login, IMS issues a JWT containing the full permission set for both systems. NMS validates the JWT signature and reads the `permissions` claim locally — no RBAC DB lookups in NMS.
+
+```
+IMS owns:                          NMS does:
+  users collection                   Validate JWT (signature + expiry)
+  roles collection                   Check permissions[] claim
+  permissions collection             Check Redis blocklist (revocation)
+  User management UI                 Reject if permission absent
+  Role assignment UI
+```
+
+**Why this works:** The JWT already carries `permissions: ["nms.device.read", "ims.server.read", ...]` as a claim. Since NMS validates the token locally (shared signing key from Vault), it can gate every endpoint without querying IMS. No extra network hop per request.
+
+**NMS-specific permission set (registered in IMS permissions table):**
 
 ```javascript
 // Permissions follow: nms.{resource}.{action} pattern
-// Examples:
+// These are defined as records in IMS's permissions collection
 "nms.device.read"         "nms.device.write"         "nms.device.delete"
 "nms.device.execute"      // Safe command execution (allowlisted only)
 "nms.cluster.read"        "nms.cluster.write"
@@ -2322,8 +2457,20 @@ NMS → IMS (webhook event):
 "nms.audit.read"          "nms.audit.export"
 "nms.vpn.read"            "nms.vpn.write"
 "nms.settings.read"       "nms.settings.write"
-"nms.users.manage"
+"nms.nic.read"            "nms.nic.write"
 ```
+
+**NMS RBACMiddleware.php** only reads the JWT claim — it does not query MongoDB for permissions:
+
+```php
+// RBACMiddleware.php (simplified)
+$permissions = $jwt->claims->permissions; // already in token
+if (!in_array($requiredPermission, $permissions)) {
+    return Response::forbidden('Insufficient permissions');
+}
+```
+
+**User management UI** lives entirely in IMS. NMS has no `/settings/users` or `/settings/roles` pages. NMS settings only covers: Zabbix config, Vault health, vendor integrations.
 
 ---
 
@@ -2345,7 +2492,8 @@ NMS → IMS (webhook event):
 | **Audit** | audit_logs, device_config_changes |
 | **VPN** | vpn_gateways, vpn_tunnels, vpn_users |
 | **Provisioning** | provisioning_jobs, provisioning_steps, manual_intervention_queue |
-| **Auth** | users, roles, permissions |
+| **NICs** | server_nics |
+| **Auth** | *(none — owned by IMS; NMS reads JWT claims only)* |
 
 **MongoDB Indexes:**
 ```javascript
@@ -2617,6 +2765,16 @@ GET    /api/provision/manual-queue   - Open manual intervention items
 PUT    /api/provision/manual-queue/{id}/resolve - Mark manual item resolved
 ```
 
+### NIC APIs
+```
+GET    /api/nics                           - List all server NICs (filterable by server, vlan, switch)
+GET    /api/nics/{id}                      - NIC details (connectivity, IPs, cable)
+PUT    /api/nics/{id}                      - Update NIC network config (VLAN, port assignment)
+GET    /api/nics/server/{ims_server_id}    - All NICs for a specific server
+GET    /api/nics/switch/{device_id}        - All NICs connected to a switch (shows switch port occupancy)
+POST   /api/nics/sync/{ims_server_id}      - Force re-sync NIC data from IMS for a server
+```
+
 ### Settings / System APIs
 ```
 GET    /api/settings/secrets/health  - Vault connectivity status
@@ -2637,14 +2795,16 @@ POST   /api/integration/ims/validate-availability   - Check IP availability
 ## 15. Frontend Specification
 
 ### 15.1 Technology Stack
-- **Framework**: React.js 18+ or Vue.js 3+
-- **State Management**: Redux Toolkit / Pinia
-- **UI Library**: Tailwind CSS + Headless UI / Ant Design
-- **Charts**: Chart.js / Recharts
-- **Topology Visualization**: D3.js / Vis.js / Cytoscape.js
-- **3D Rack Views**: Three.js (optional for rack elevation rendering)
-- **API Client**: Axios with interceptors
-- **Build Tool**: Vite
+- **Rendering**: PHP server-rendered templates (no separate SPA build process)
+- **CSS Framework**: Tailwind CSS (via CDN or compiled with standalone CLI — no Node.js required for basic use)
+- **JS Reactivity**: Alpine.js — lightweight (16KB), Vue-like directives in HTML, handles dropdowns, modals, tab switching, form validation without a build step
+- **Topology Visualization**: Cytoscape.js — network graphs; D3.js — charts and custom visuals
+- **3D Rack Views**: Three.js — optional, for rack elevation rendering
+- **Charts**: Chart.js — device health, IPAM utilization gauges
+- **API Calls from frontend**: Fetch API (native) or Axios — calls NMS JSON API from PHP-rendered pages
+- **No build tool required**: Tailwind CLI (optional, for purging unused CSS in production); Alpine.js and other libs loaded via CDN script tags or bundled as static assets
+
+**Rationale:** Backend is PHP. Server-rendered templates eliminate a separate frontend build pipeline, reduce deployment complexity, and keep the stack uniform. Alpine.js covers all reactive UI needs (dynamic forms, modals, live data refresh) without JSX or a virtual DOM. D3.js/Cytoscape.js/Three.js work identically in plain HTML — they don't require React/Vue wrappers.
 
 ### 15.2 Page Structure
 
@@ -2703,10 +2863,14 @@ POST   /api/integration/ims/validate-availability   - Check IP availability
 /audit/changes              - Configuration changes
 
 /settings                   - System settings
-/settings/users             - User management
-/settings/roles             - Role management
 /settings/zabbix            - Zabbix integration settings
 /settings/vault             - Secrets manager health
+/settings/vendors           - Vendor API configs (credentials via Vault)
+
+// Note: User/role management lives in IMS — no /settings/users or /settings/roles in NMS
+
+/nics                       - NIC overview (all server NICs, filterable by site/switch/VLAN)
+/nics/server/:ims_server_id - NICs for a specific server (connectivity + IP assignments)
 ```
 
 ### 15.3 Dashboard Components
@@ -2736,38 +2900,81 @@ POST   /api/integration/ims/validate-availability   - Check IP availability
 - Cross-rack connections visualized
 - Empty rack slots highlighted
 
-### 15.4 UI Components
+### 15.4 UI Structure (PHP Templates + Alpine.js)
 
 ```
-Components/
-├── Layout/
-│   ├── Sidebar, Header, Breadcrumb, PageContainer
-├── Common/
-│   ├── DataTable, Modal, ConfirmDialog, Toast
-│   ├── LoadingSpinner, StatusBadge, SearchInput, DriftBadge
-├── Forms/
-│   ├── DeviceForm, ClusterForm, IPPoolForm
-│   ├── FirewallPolicyForm, RouteForm, CableForm
-│   ├── SiteForm, RackForm, FormField
-├── Charts/
-│   ├── UtilizationGauge, PieChart, BarChart
-├── Topology/
-│   ├── TopologyCanvas, TopologyNode, TopologyLink
-│   ├── TopologyControls, NodeDetails, ClusterGroup
-├── Physical/
-│   ├── SiteMap, RackElevation, RackSlot
-│   ├── CableTrace, PatchPanelView, PortStatus
-├── IPAM/
-│   ├── IPGrid, IPCell, PoolCard, AssignmentDetails
-├── Firewall/
-│   ├── PolicyList, PolicyEditor, RuleBuilder, ObjectSelector
-├── Drift/
-│   ├── DriftList, DriftDiffView, DriftResolver
-├── Provisioning/
-│   ├── JobProgress, StepTimeline, CompensationStatus
-│   └── ManualQueueList
-└── BGP/
-    ├── SessionList, SessionStatus, ConflictAlert
+views/
+├── layout/
+│   ├── _base.php          - HTML shell (head, nav, footer)
+│   ├── _sidebar.php       - Navigation sidebar
+│   ├── _header.php        - Top bar (breadcrumb, user info from JWT)
+│   └── _flash.php         - Toast / flash message partial
+├── partials/
+│   ├── _table.php         - Reusable data table (Alpine.js sortable/filterable)
+│   ├── _modal.php         - Modal wrapper (Alpine.js x-show)
+│   ├── _badge.php         - Status/drift badge
+│   ├── _confirm.php       - Delete confirmation dialog
+│   └── _pagination.php    - Pagination controls
+├── devices/
+│   ├── index.php          - Device list (with cluster badges, drift indicators)
+│   ├── show.php           - Device detail (ports, connections, drift status)
+│   └── ports.php          - Port management
+├── clusters/
+│   ├── index.php
+│   └── show.php
+├── drift/
+│   ├── index.php          - All open drifts
+│   └── show.php           - Diff view + resolve actions (Alpine.js diff toggle)
+├── sites/
+│   ├── index.php          - World map (Leaflet.js or inline SVG)
+│   └── show.php
+├── racks/
+│   ├── show.php           - Rack elevation (Three.js or pure CSS/SVG)
+│   └── cables.php
+├── ipam/
+│   ├── index.php          - Pool utilization overview
+│   ├── pools/index.php
+│   ├── pools/show.php     - IP grid (Alpine.js rendered)
+│   └── assignments.php
+├── firewall/
+│   ├── policies/index.php
+│   ├── policies/edit.php  - Rule builder (Alpine.js dynamic rows)
+│   └── objects/index.php
+├── routes/
+│   └── index.php
+├── routing/
+│   ├── bgp.php
+│   └── conflicts.php
+├── neighbors/
+│   └── index.php
+├── topology/
+│   ├── logical.php        - Cytoscape.js canvas
+│   ├── physical.php       - Physical racks + cable traces
+│   └── site.php
+├── nics/
+│   ├── index.php          - NIC overview (filterable by VLAN/switch/site)
+│   └── server.php         - NICs for a specific server
+├── vpn/
+│   ├── tunnels.php
+│   └── users.php
+├── provision/
+│   ├── index.php          - Job dashboard
+│   ├── show.php           - Step-by-step saga progress
+│   └── manual-queue.php   - Operator intervention queue
+├── audit/
+│   └── index.php
+└── settings/
+    ├── index.php
+    ├── zabbix.php
+    ├── vault.php
+    └── vendors.php        - Vendor API credential health
+
+js/
+├── topology.js            - Cytoscape.js init + layout logic
+├── rack-view.js           - Three.js rack elevation
+├── charts.js              - Chart.js initialization
+├── ipam-grid.js           - IP grid rendering
+└── app.js                 - Global Alpine.js store, fetch helpers, JWT refresh
 ```
 
 ---
@@ -2805,11 +3012,12 @@ nms/
 │   │   ├── provision/
 │   │   │   └── manual-queue/
 │   │   ├── settings/
+│   │   ├── nics/                    # NIC management endpoints
 │   │   └── integration/
 │   │       └── ims/
 │   └── middleware/
 │       ├── AuthMiddleware.php
-│       ├── RBACMiddleware.php
+│       ├── RBACMiddleware.php        # Reads permissions[] JWT claim — no DB query
 │       ├── RateLimitMiddleware.php
 │       ├── IdempotencyMiddleware.php  # X-Idempotency-Key handling
 │       └── AuditMiddleware.php
@@ -2830,8 +3038,7 @@ nms/
 │   │   ├── JWTHelper.php            # Token generation/validation
 │   │   ├── TokenBlocklist.php       # Redis-backed revocation
 │   │   ├── M2MTokenHelper.php       # Machine-to-machine tokens
-│   │   ├── ACL.php
-│   │   └── Permissions.php
+│   │   └── ImsTicketClient.php      # Create/update tickets in IMS ticket system via M2M
 │   ├── helpers/
 │   │   ├── Response.php
 │   │   ├── Validator.php
@@ -2861,6 +3068,8 @@ nms/
 │       ├── neighbors/
 │       │   ├── NeighborManager.php   # ARP + NDP
 │       │   └── NeighborSync.php
+│       ├── nics/
+│       │   └── NicManager.php        # server_nics: sync from IMS webhook, port/VLAN/IP linking
 │       ├── infrastructure/
 │       │   ├── SiteManager.php
 │       │   ├── RackManager.php
@@ -2914,19 +3123,42 @@ nms/
 ├── database/
 │   ├── setup.php                    # Collection + index creation
 │   └── seeds/
-│       ├── roles.php
-│       ├── permissions.php
-│       └── default_services.php
+│       └── default_services.php     # Default firewall service objects
+│       // Note: roles.php + permissions.php removed — owned by IMS
 │
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   ├── store/
-│   │   ├── api/
-│   │   └── utils/
-│   ├── public/
-│   └── package.json
+├── views/                               # PHP templates (server-rendered)
+│   ├── layout/
+│   │   ├── _base.php
+│   │   ├── _sidebar.php
+│   │   └── _header.php
+│   ├── partials/
+│   ├── devices/
+│   ├── clusters/
+│   ├── drift/
+│   ├── sites/
+│   ├── racks/
+│   ├── ipam/
+│   ├── firewall/
+│   ├── routes/
+│   ├── routing/
+│   ├── neighbors/
+│   ├── topology/
+│   ├── nics/
+│   ├── vpn/
+│   ├── provision/
+│   ├── audit/
+│   └── settings/
+│
+├── public/
+│   ├── index.php                        # Web entry point
+│   ├── css/
+│   │   └── app.css                      # Compiled Tailwind CSS
+│   └── js/
+│       ├── app.js                       # Alpine.js store + fetch helpers
+│       ├── topology.js                  # Cytoscape.js init
+│       ├── rack-view.js                 # Three.js rack elevation
+│       ├── charts.js                    # Chart.js
+│       └── ipam-grid.js                 # IP grid rendering
 │
 ├── tests/                           # Tests live alongside code, run per-phase
 │   ├── unit/
@@ -2955,7 +3187,7 @@ nms/
 - Secrets manager abstraction: `SecretsManagerInterface` + `VaultSecretsManager` + `AppEncryptedSecretsManager` (fallback)
 - JWT authentication: generation, validation, refresh rotation, Redis-backed revocation blocklist
 - M2M token support (for IMS integration)
-- RBAC framework: roles, permissions, middleware
+- RBAC middleware: `RBACMiddleware.php` reads `permissions[]` claim from JWT — **no roles/permissions DB in NMS** (owned by IMS)
 - Standardized API response format
 - Audit logging framework (middleware-based)
 - Input validation helpers
@@ -2967,7 +3199,7 @@ nms/
 - `CircuitBreaker.php`: per-device failure tracking
 
 **Testing:**
-- Unit tests: JWT generation/validation, IPv4/IPv6 utilities, RBAC permission checks
+- Unit tests: JWT generation/validation, IPv4/IPv6 utilities, RBAC JWT claim checks
 - Unit tests: retry handler backoff calculation, circuit breaker state transitions
 - Integration test: MongoDB connection + basic CRUD
 - Integration test: Redis connection + blocklist operations
@@ -3143,6 +3375,10 @@ nms/
 - Server deprovisioning workflow
 - IMS integration endpoints (provision, deprovision, validate, connections)
 - Bidirectional webhook event delivery (NMS→IMS, IMS→NMS)
+- `server_nics` collection setup + `NicManager.php`
+- NIC sync on `server.nic_change` webhook (update MAC, port, VLAN, IP links)
+- NIC API endpoints (`/api/nics/*`)
+- Ticket creation via IMS M2M API for manual_intervention_queue items (`ImsTicketClient.php`)
 
 **Testing:**
 - Unit tests: saga executor runs steps in order, populates compensation params
@@ -3162,6 +3398,8 @@ nms/
 - [ ] Pre-validation catches unreachable devices before any mutation
 - [ ] Idempotency keys prevent duplicate provisioning
 - [ ] IMS webhook events are sent on provision/deprovision completion
+- [ ] NIC sync on `server.nic_change` webhook updates server_nics correctly
+- [ ] Manual intervention queue items create tickets in IMS ticket system via M2M
 - [ ] At least one full provision→deprovision cycle works against a real device
 - [ ] All Phase 6 tests pass
 
@@ -3247,35 +3485,41 @@ nms/
 
 **Dependencies:** All backend phases (1-9) complete
 
+**Stack:** PHP server-rendered templates + Tailwind CSS + Alpine.js + Cytoscape.js + Three.js + Chart.js
+
 **Work:**
-- Frontend project setup (Vite + React/Vue)
-- Authentication UI (login, token refresh)
-- Dashboard (health overview, IPAM charts, drift alerts, recent jobs)
-- Site/Rack management UI (site map, rack elevation view)
+- PHP template base layout (`_base.php`, `_sidebar.php`, `_header.php`) + Alpine.js global store
+- Tailwind CSS setup (standalone CLI for production build, CDN for dev)
+- Authentication UI (login page, JWT refresh interceptor in `app.js`)
+- Dashboard (health overview, IPAM utilization charts via Chart.js, drift alerts, recent jobs)
+- Site/Rack management UI (site map, rack elevation via Three.js or SVG)
 - Cable management UI (with cable trace visualization through patch panels)
 - Device management UI (with cluster badges, drift indicators, port views)
 - Cluster management UI
-- Drift management UI (diff view, resolve actions)
-- IPAM UI with IP grid (IPv4 + IPv6 pools)
-- Firewall policy UI
+- Drift management UI (diff view, resolve actions — Alpine.js toggles)
+- IPAM UI with IP grid (IPv4 + IPv6 pools — Alpine.js rendered grid)
+- Firewall policy UI (dynamic rule builder via Alpine.js)
 - Route management UI
 - BGP monitoring dashboard
-- Topology visualization (logical + physical, with cluster grouping)
-- Provisioning dashboard (job progress, step timeline, manual queue)
+- Topology visualization (Cytoscape.js — logical + physical, with cluster grouping)
+- **NIC management UI** (NIC overview, per-server NIC + connectivity + IP view)
+- Provisioning dashboard (job progress, step timeline, manual intervention queue)
 - Monitoring dashboard (Zabbix health data)
 - Audit log viewer
-- Settings pages (users, roles, Zabbix config, Vault health)
+- Settings pages (Zabbix config, Vault health, vendor configs) — **no user/role pages (IMS owns those)**
 
 **Testing:**
 - E2E tests: login → navigate → create device → view in topology
 - E2E tests: provision server → track job progress in UI → verify completion
 - E2E tests: drift detected → view diff → resolve in UI
+- E2E test: server NIC change webhook → NIC record updates in UI
 
 **Exit Criteria:**
 - [ ] All pages render correctly and interact with backend APIs
 - [ ] Topology visualization shows devices, links, clusters, and drift status
 - [ ] Rack elevation view shows device placement with patch panels
 - [ ] Cable trace shows full path through patch panels
+- [ ] NIC page shows server → cable → switch port connectivity correctly
 - [ ] Provisioning job progress is visible in real-time
 - [ ] All E2E tests pass
 
@@ -3301,9 +3545,11 @@ This NMS provides a comprehensive infrastructure architecture and configuration 
 
 8. **Infrastructure Visualization** — Interactive topology mapping with physical rack views, cable tracing through patch panels, and pre-computed path materialization.
 
-9. **IMS Synergy** — Bidirectional webhook integration. Combined with IMS, provides the complete hardware-to-network picture: which server is in which rack, connected to which port through which patch panel, with which IPs and firewall rules.
+9. **IMS Synergy** — Bidirectional webhook integration. Combined with IMS, provides the complete hardware-to-network picture: which server is in which rack, connected to which port through which patch panel, with which IPs and firewall rules. Shared RBAC (IMS-owned) and shared ticketing (IMS-owned) eliminate duplicated infrastructure across the two systems.
 
-10. **Production-Ready Auth** — JWT with key rotation, Redis-backed revocation, M2M tokens for IMS integration, RBAC with 50+ permissions.
+10. **NIC Tracking** — `server_nics` collection maps each server NIC to its switch port, VLAN, cable, and IP assignments. The missing link between IMS (physical NIC hardware) and NMS (network config): cable path from NIC → patch panel → switch port.
+
+11. **Production-Ready Auth** — JWT with key rotation, Redis-backed revocation, M2M tokens for IMS integration. RBAC is **shared with IMS**: permissions embedded in JWT, no separate auth DB in NMS.
 
 11. **Secrets Management** — Device credentials never stored in MongoDB. Vault references only, with provider abstraction layer.
 
