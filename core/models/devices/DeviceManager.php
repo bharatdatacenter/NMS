@@ -7,6 +7,7 @@ namespace NMS\Core\Models\Devices;
 use MongoDB\BSON\ObjectId;
 use MongoDB\BSON\UTCDateTime;
 use NMS\Core\Database\Collection;
+use NMS\Core\Database\MongoDB;
 
 /**
  * DeviceManager
@@ -215,6 +216,74 @@ class DeviceManager extends Collection
                 'status' => $cbState['state'] === 'open' ? 'unreachable' : 'online',
             ],
         ]);
+    }
+
+    // ─── Backup ───────────────────────────────────────────────────────────────
+
+    /**
+     * Store a config backup for a device.
+     * The raw config content is provided by the vendor adapter (already fetched).
+     * Stores in the `device_backups` collection, updates device.last_backup.
+     *
+     * @param  string $deviceId  Device ID
+     * @param  string $content   Raw config content (text or JSON string)
+     * @return string            Backup document ID
+     */
+    public function storeBackup(string $deviceId, string $content): string
+    {
+        $backupCollection = MongoDB::getInstance()->selectCollection('device_backups');
+
+        $doc = [
+            '_id'         => new ObjectId(),
+            'device_id'   => new ObjectId($deviceId),
+            'content'     => $content,
+            'size_bytes'  => strlen($content),
+            'created_at'  => new UTCDateTime(),
+        ];
+
+        $backupCollection->insertOne($doc);
+        $backupId = (string)$doc['_id'];
+
+        // Update device.last_backup
+        $this->updateById($deviceId, [
+            '$set' => ['last_backup' => new UTCDateTime()],
+        ]);
+
+        return $backupId;
+    }
+
+    /**
+     * List backups for a device, newest first.
+     *
+     * @return array[]  [{id, device_id, size_bytes, created_at}, ...]  (no content — use getBackup for content)
+     */
+    public function listBackups(string $deviceId, int $limit = 20): array
+    {
+        $backupCollection = MongoDB::getInstance()->selectCollection('device_backups');
+
+        $cursor = $backupCollection->find(
+            ['device_id' => new ObjectId($deviceId)],
+            [
+                'sort'       => ['created_at' => -1],
+                'limit'      => $limit,
+                'projection' => ['content' => 0],  // Exclude large content from list
+            ]
+        );
+
+        return array_map(
+            fn($doc) => json_decode(json_encode($doc), true),
+            $cursor->toArray()
+        );
+    }
+
+    /**
+     * Get a specific backup document including content.
+     */
+    public function getBackup(string $backupId): ?array
+    {
+        $backupCollection = MongoDB::getInstance()->selectCollection('device_backups');
+        $doc = $backupCollection->findOne(['_id' => new ObjectId($backupId)]);
+        return $doc ? json_decode(json_encode($doc), true) : null;
     }
 
     // ─── Rack sync ────────────────────────────────────────────────────────────
