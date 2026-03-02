@@ -223,4 +223,18 @@ class ObjectManager
         $doc = $this->vips->findOne(['_id' => new ObjectId($id)]);
         return $doc ? iterator_to_array($doc) : null;
     }
+
+    /**
+     * Delete a VIP by ID.
+     *
+     * @throws \RuntimeException if not found
+     */
+    public function deleteVip(string $id): bool
+    {
+        $result = $this->vips->deleteOne(['_id' => new ObjectId($id)]);
+        if ($result->getDeletedCount() === 0) {
+            throw new \RuntimeException("VIP {$id} not found");
+        }
+        return true;
+    }
 }
