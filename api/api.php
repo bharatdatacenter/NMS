@@ -201,6 +201,14 @@ $routes = [
     // Settings
     'GET /settings/secrets/health' => ['handler' => 'settings/SecretsHealthHandler', 'auth' => true, 'permission' => 'nms.settings.read'],
     'GET /settings/redis/health'   => ['handler' => 'settings/RedisHealthHandler',   'auth' => true, 'permission' => 'nms.settings.read'],
+
+    // Notifications (multi-channel alert delivery)
+    'GET /notifications/rules'          => ['handler' => 'notifications/RulesListHandler',  'auth' => true, 'permission' => 'nms.settings.read'],
+    'POST /notifications/rules'         => ['handler' => 'notifications/RuleCreateHandler', 'auth' => true, 'permission' => 'nms.settings.write'],
+    'PUT /notifications/rules/{id}'     => ['handler' => 'notifications/RuleUpdateHandler', 'auth' => true, 'permission' => 'nms.settings.write'],
+    'DELETE /notifications/rules/{id}'  => ['handler' => 'notifications/RuleDeleteHandler', 'auth' => true, 'permission' => 'nms.settings.write'],
+    'GET /notifications/log'            => ['handler' => 'notifications/LogHandler',        'auth' => true, 'permission' => 'nms.settings.read'],
+    'POST /notifications/test'          => ['handler' => 'notifications/TestHandler',       'auth' => true, 'permission' => 'nms.settings.write'],
 ];
 
 // ─── Router ──────────────────────────────────────────────────────────────────

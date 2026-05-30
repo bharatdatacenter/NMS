@@ -96,4 +96,11 @@ $db->topology_snapshots->createIndex(['created_at' => -1], ['name' => 'created_a
 // ─── Device Backups ──────────────────────────────────────────────────────────────
 $db->device_backups->createIndex(['device_id' => 1, 'created_at' => -1], ['name' => 'device_backup_time']);
 
+// ─── Notifications ───────────────────────────────────────────────────────────────
+$db->notification_rules->createIndex(['enabled' => 1, 'event_type' => 1], ['name' => 'enabled_event_type']);
+$db->notification_rules->createIndex(['event_type' => 1, 'min_severity' => 1], ['name' => 'event_severity']);
+$db->notification_log->createIndex(['created_at' => -1], ['name' => 'created_at_desc']);
+$db->notification_log->createIndex(['channel' => 1, 'status' => 1], ['name' => 'channel_status']);
+$db->notification_log->createIndex(['event_type' => 1, 'created_at' => -1], ['name' => 'event_time']);
+
 echo "All indexes created successfully.\n";

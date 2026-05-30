@@ -11,6 +11,8 @@ use NMS\Core\Auth\JWTHelper;
 use NMS\Core\Auth\M2MTokenHelper;
 use NMS\Core\Database\MongoDB;
 use NMS\Core\Models\Drift\DriftDetector;
+use NMS\Core\Models\Notifications\NotificationManager;
+use NMS\Core\Models\Notifications\NotificationMessage;
 use NMS\Core\Models\Secrets\AppEncryptedSecretsManager;
 use NMS\Core\Models\Secrets\VaultSecretsManager;
 
@@ -35,14 +37,16 @@ class DriftScanner
     private \MongoDB\Collection $devices;
     private \MongoDB\Collection $driftLog;
     private \MongoDB\Collection $ticketRefs;
+    private ?NotificationManager $notifier;
 
-    public function __construct(?DriftDetector $detector = null)
+    public function __construct(?DriftDetector $detector = null, ?NotificationManager $notifier = null)
     {
         $db = MongoDB::getInstance();
         $this->detector = $detector ?? new DriftDetector();
         $this->devices = $db->selectCollection('devices');
         $this->driftLog = $db->selectCollection('config_drift_log');
         $this->ticketRefs = $db->selectCollection('ims_ticket_refs');
+        $this->notifier = $notifier;
     }
 
     /**
@@ -78,6 +82,18 @@ class DriftScanner
                     if ($ticketId !== null) {
                         $summary['unreachable_tickets']++;
                     }
+
+                    $name = (string)($device['name'] ?? $deviceId);
+                    $this->notify(
+                        'device_unreachable',
+                        4, // high
+                        "Device unreachable: {$name}",
+                        "Device {$name} has been unreachable for more than 15 minutes.",
+                        [
+                            'device_id' => $deviceId,
+                            'ticket_id' => $ticketId ?? '',
+                        ]
+                    );
                 }
                 continue;
             }
@@ -104,6 +120,21 @@ class DriftScanner
                                 ['$set' => ['ims_ticket_id' => $ticketId, 'updated_at' => new UTCDateTime()]]
                             );
                         }
+
+                        // Fan out a notification alongside the ticket. Dispatch is
+                        // best-effort and must never affect the scan outcome.
+                        $name = (string)($device['name'] ?? $deviceId);
+                        $this->notify(
+                            'drift_detected',
+                            3, // average
+                            "Config drift detected on {$name}",
+                            "Configuration drift was detected on device {$name} and requires operator review.",
+                            [
+                                'device_id' => $deviceId,
+                                'drift_id'  => (string)($drift['drift_id'] ?? ''),
+                                'ticket_id' => $ticketId ?? '',
+                            ]
+                        );
                     }
                 }
             } catch (\Throwable $e) {
@@ -259,6 +290,25 @@ class DriftScanner
             return $ticketId !== '' ? $ticketId : null;
         } catch (\Throwable) {
             return null;
+        }
+    }
+
+    /**
+     * Best-effort multi-channel notification. Lazily builds the
+     * NotificationManager and swallows all failures — alert delivery must
+     * never break or slow a drift scan.
+     */
+    private function notify(string $eventType, int $severity, string $title, string $body, array $sourceRef): void
+    {
+        try {
+            if ($this->notifier === null) {
+                $this->notifier = new NotificationManager();
+            }
+            $this->notifier->dispatch(
+                new NotificationMessage($eventType, $severity, $title, $body, $sourceRef)
+            );
+        } catch (\Throwable) {
+            // Intentionally ignored.
         }
     }
 
