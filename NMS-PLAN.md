@@ -13,14 +13,13 @@
 10. [Zabbix Monitoring Integration](#7-zabbix-monitoring-integration)
 11. [Compliance & Audit Logs](#8-compliance--audit-logs)
 12. [VPN Management](#9-vpn-management)
-13. [Automatic Provisioning](#10-automatic-provisioning)
-14. [IMS Integration](#11-ims-integration)
-15. [Authentication & Authorization](#12-authentication--authorization)
-16. [Complete Database Schema (MongoDB)](#13-complete-database-schema-mongodb)
-17. [Complete API Reference](#14-complete-api-reference)
-18. [Frontend Specification](#15-frontend-specification)
-19. [Project Structure](#16-project-structure)
-20. [Implementation Phases](#17-implementation-phases)
+13. [IMS Integration](#10-ims-integration)
+14. [Authentication & Authorization](#11-authentication--authorization)
+15. [Complete Database Schema (MongoDB)](#12-complete-database-schema-mongodb)
+16. [Complete API Reference](#13-complete-api-reference)
+17. [Frontend Specification](#14-frontend-specification)
+18. [Project Structure](#15-project-structure)
+19. [Implementation Phases](#16-implementation-phases)
 
 ---
 
@@ -30,7 +29,6 @@ The NMS (Network Management System) is an infrastructure architecture and config
 
 **Core Objectives:**
 - **Infrastructure Architecture**: Complete physical + logical mapping of all sites, racks, devices, ports, and connections across a 3D spatial model (building/floor/room/row/rack/U-position)
-- **Provisioning & Deprovisioning**: Automated network configuration when servers are deployed or removed, with saga-based rollback for safe multi-step operations
 - **Configuration Management**: Centralized IPAM, routing, ARP/NDP, and firewall policy management with drift detection for out-of-band changes
 - **Multi-Site Awareness**: 3D infrastructure model spanning multiple data centers, racks, and interconnections — network infrastructure cannot be modeled on a flat 2D plane when devices span multiple physical sites
 - **IMS Synergy**: Combined with IMS, provides a complete hardware-to-network picture — what's plugged where, physically and logically. IMS owns hardware/OS; NMS owns network identity (IPs, routes, firewall rules, cable paths)
@@ -61,7 +59,7 @@ Network infrastructure is inherently hierarchical and graph-like. A data center 
 | **Secrets** | HashiCorp Vault (or provider abstraction) | Device credentials, HMAC signing keys, VPN PSKs. Fallback: app-layer encryption with OS keyring key (temporary) |
 | **Authentication** | JWT (HS256 → future RS256) | Shared with IMS via API. Key stored in Vault, not .env |
 | **Authorization** | RBAC (shared with IMS) | Permissions validated via JWT claims. IMS owns users/roles/permissions — no RBAC DB in NMS |
-| **API Architecture** | RESTful JSON API | Standardized responses, `X-Idempotency-Key` on mutating provisioning endpoints |
+| **API Architecture** | RESTful JSON API | Standardized responses |
 | **Design Pattern** | MVC with Service Layer | Clean separation |
 | **Monitoring** | Zabbix API | External monitoring integration (read-only from NMS) |
 | **Resilience** | Exponential Backoff + Circuit Breaker | All vendor API calls: base 2s, max 30s, jitter. Circuit breaker per device after 5 consecutive failures |
@@ -93,10 +91,10 @@ Network infrastructure is inherently hierarchical and graph-like. A data center 
 │  │   Auth   │ Devices  │   IPAM   │ Firewall │  Routes  │ Topology │       │
 │  │ + RBAC   │+Clusters │          │          │ +BGP Mon │          │       │
 │  └──────────┴──────────┴──────────┴──────────┴──────────┴──────────┘       │
-│  ┌──────────┬──────────┬──────────┬──────────┐                             │
-│  │ Provisn  │  Drift   │   IMS    │  Audit   │                             │
-│  │  (Saga)  │ Resolver │ Integr.  │          │                             │
-│  └──────────┴──────────┴──────────┴──────────┘                             │
+│  ┌──────────┬──────────┬──────────┐                                        │
+│  │  Drift   │   IMS    │  Audit   │                                        │
+│  │ Resolver │ Integr.  │          │                                        │
+│  └──────────┴──────────┴──────────┘                                        │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -109,10 +107,10 @@ Network infrastructure is inherently hierarchical and graph-like. A data center 
 │  │ Route Manager  │  │Neighbor Manager│  │Topology Builder│                │
 │  │  + BGP Monitor │  │  (ARP + NDP)   │  │ + Path Cache   │                │
 │  └────────────────┘  └────────────────┘  └────────────────┘                │
-│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐                │
-│  │  Provisioning  │  │ Zabbix Client  │  │ Drift Detector │                │
-│  │ Engine (Saga)  │  │  (Monitoring)  │  │                │                │
-│  └────────────────┘  └────────────────┘  └────────────────┘                │
+│  ┌────────────────┐  ┌────────────────┐                                    │
+│  │ Zabbix Client  │  │ Drift Detector │                                    │
+│  │  (Monitoring)  │  │                │                                    │
+│  └────────────────┘  └────────────────┘                                    │
 │  ┌────────────────┐  ┌────────────────┐                                    │
 │  │Cluster Manager │  │Secrets Manager │ ← Vault / Provider Abstraction     │
 │  └────────────────┘  └────────────────┘                                    │
@@ -851,7 +849,7 @@ IP Blocks (from ARIN/RIPE/etc.)
         id: "ims-server-uuid-123",
         name: "web-server-01"
     },
-    reason: "Server provisioning via IMS",
+    reason: "Manual assignment via NMS",
     performed_by: ObjectId,
     performed_at: ISODate
 }
@@ -1069,7 +1067,7 @@ Workflow: Release IP
     new_state: { /* snapshot */ },
     changed_by: ObjectId,
     changed_at: ISODate,
-    reason: "Server provisioning via IMS"
+    reason: "Manual policy update via NMS"
 }
 
 // ─── firewall_vips collection ───
@@ -1146,7 +1144,7 @@ Workflow: Release IP
 
 NMS will **not** configure BGP or OSPF. It monitors their state for two purposes:
 1. Dashboard visibility (BGP session health, learned prefix counts)
-2. **Pre-provisioning conflict detection** — before creating a static route, check if a BGP-learned route already covers that prefix
+2. **Conflict detection** — before creating a static route, check if a BGP-learned route already covers that prefix
 
 ### 4.2 Static Route Collection (MongoDB)
 
@@ -1229,22 +1227,22 @@ NMS will **not** configure BGP or OSPF. It monitors their state for two purposes
 }
 ```
 
-### 4.4 Pre-Provisioning BGP Conflict Check
+### 4.4 BGP Conflict Check
 
 **The problem with sampling:** BGP tables can exceed 900,000 routes. Sampling "top N prefixes" would miss the specific /32 or /24 that conflicts with a new static route.
 
-**Solution: Targeted query, not full table dump.** Before creating a static route, the provisioning engine calls `adapter->getBGPPrefixesForRange(cidr)` which asks the device: "do you have any BGP-learned routes that overlap this specific CIDR?" This is a targeted query that returns only matching prefixes, not the entire RIB.
+**Solution: Targeted query, not full table dump.** Before creating a static route, the system calls `adapter->getBGPPrefixesForRange(cidr)` which asks the device: "do you have any BGP-learned routes that overlap this specific CIDR?" This is a targeted query that returns only matching prefixes, not the entire RIB.
 
 ```
-Pre-Provisioning Conflict Check:
+BGP Conflict Check:
 1. About to create static route for 85.209.161.100/32
 2. Call adapter->getBGPPrefixesForRange("85.209.161.100/32") on the target device
 3. Device CLI/API returns any BGP routes covering that prefix:
    - Exact match: 85.209.161.100/32 learned via BGP (conflict!)
    - Covering route: 85.209.161.0/24 learned via BGP (potential conflict)
 4. If conflict found:
-   - Log to audit: action "provisioning.conflict.bgp_overlap"
-   - Return warning to operator, do NOT auto-provision
+   - Log to audit: action "route.conflict.bgp_overlap"
+   - Return warning to operator, do NOT proceed
    - Operator decides: proceed (static route will override) or abort
 5. If no conflict: proceed with static route creation
 ```
@@ -1800,7 +1798,7 @@ NMS queries Zabbix on-demand and caches briefly in Redis:
 - **Active problems**: 30s TTL (alerts affecting NMS-managed devices)
 - **Availability**: 30s TTL (online/offline confirmation)
 
-Redis is **required** (not optional) for this caching, for the JWT blocklist (Section 12), for rate limiting, and for idempotency key storage.
+Redis is **required** (not optional) for this caching, for the JWT blocklist (Section 11), for rate limiting, and for idempotency key storage.
 
 ---
 
@@ -1825,7 +1823,7 @@ Redis is **required** (not optional) for this caching, for the JWT blocklist (Se
     // What
     action: "ip.assign",                        // ip.assign | device.update | policy.create |
                                                 // drift.detected | drift.resolved |
-                                                // credential.accessed | provisioning.conflict.bgp_overlap
+                                                // credential.accessed | route.conflict.bgp_overlap
     resource_type: "ip",                        // ip | device | policy | route | neighbor | cluster | drift | credential
     resource_id: "85.209.161.100",
     resource_name: "IP 85.209.161.100",
@@ -1839,7 +1837,7 @@ Redis is **required** (not optional) for this caching, for the JWT blocklist (Se
     },
 
     // Idempotency
-    idempotency_key: null,                      // Set on provisioning mutations
+    idempotency_key: null,                      // Set when X-Idempotency-Key header is used
 
     // Result
     status: "success",                          // success | failure | partial
@@ -1980,211 +1978,9 @@ Redis is **required** (not optional) for this caching, for the JWT blocklist (Se
 
 ---
 
-## 10. Automatic Provisioning
+## 10. IMS Integration
 
-### 10.1 Saga Pattern with Compensating Transactions
-
-The original plan used a `rollback_data` array — a list of IDs to delete on failure. This is fragile: if the rollback itself fails, you have orphaned resources with no recovery path.
-
-**The fix: Saga pattern.** Each provisioning step has an explicit **forward action** and **compensating action**. The compensating action is the logical inverse, designed to be idempotent (safe to call multiple times).
-
-### 10.2 Two-Phase Execution
-
-```
-Phase 0 — Validate (read-only, NO mutations):
-  a. Confirm IP pool has availability
-  b. Confirm router/firewall device is reachable (health check via adapter)
-  c. Confirm no IP conflicts (IPAM check)
-  d. Run BGP conflict check (Section 4.4)
-  e. Validate cluster status if HA cluster
-  f. If ANY validation fails: abort immediately, nothing to roll back
-
-Phase 1 — Execute (saga with compensating transactions):
-  Steps execute in order. Each step records its compensating action.
-  On failure: reverse-execute compensations for all completed steps.
-```
-
-### 10.3 Provisioning Workflows
-
-**Complete Server Provisioning Flow (Dual-Stack):**
-```
-Input: Server MAC, Required IPs (L2 count, L3 count per address family),
-       Firewall rules, Address families ["ipv4", "ipv6"]
-
-Phase 0: Pre-Validate
-  ✓ Pool availability for all requested address families
-  ✓ Device reachability for all involved devices/clusters
-  ✓ No BGP prefix conflicts for requested ranges
-  ✓ HA cluster health (if applicable)
-
-Phase 1: Execute Saga
-  IPv4 Track:
-    Step 1: Allocate L2 IPv4 (atomic findOneAndUpdate)
-    Step 2: For each L3 IPv4: allocate IP
-    Step 3: For each L3 IPv4: create static /32 route
-    Step 4: For each L3 IPv4: create ARP entry
-    Step 5: For each public IPv4: create VIP
-    Step 6: Create inbound firewall policy (with VIP/NAT)
-    Step 7: Create outbound firewall policy (with SNAT)
-
-  IPv6 Track (parallel):
-    Step 8: Allocate L2 IPv6 from /64 pool
-    Step 9: For each L3 IPv6: allocate IP
-    Step 10: For each L3 IPv6: create static /128 route
-    Step 11: For each L3 IPv6: create NDP entry
-    Step 12: Create inbound firewall policy (NO VIP, NO NAT — direct address)
-    Step 13: Create outbound firewall policy (NO SNAT)
-
-Phase 2: Verify
-  ✓ Routes exist on device
-  ✓ ARP/NDP entries exist
-  ✓ Firewall policies active
-  ✓ Test connectivity (ping from device to L2 IP)
-
-Phase 3: Notify
-  ✓ Update IMS with assigned IPs (via webhook)
-  ✓ Log all actions to audit
-```
-
-### 10.4 Provisioning Collections (MongoDB)
-
-```javascript
-// ─── provisioning_jobs collection ───
-{
-    _id: ObjectId,
-
-    // Idempotency: same key returns same result (stored in Redis, 24h TTL)
-    idempotency_key: "prov-ims-uuid-123-1709312400",
-
-    request_source: "ims_api",                  // manual | ims_api | scheduled
-
-    request_data: {
-        server_id: "ims-uuid-123",
-        server_name: "web-server-01",
-        mac_address: "AA:BB:CC:11:22:33",
-        datacenter: "DC1",
-        address_families: ["ipv4", "ipv6"],     // Dual-stack support
-        l2_ip_count: 1,
-        l3_ip_count: 2,
-        firewall_rules: [
-            { type: "inbound", ports: [80, 443], sources: ["any"] },
-            { type: "outbound", allow_all: true }
-        ]
-    },
-
-    server_id: "ims-uuid-123",
-    server_name: "web-server-01",
-    server_mac: "AA:BB:CC:11:22:33",
-
-    status: "completed",                        // pending | validating | running | completed |
-                                                // failed | compensating | compensated | partial_compensation
-    current_step: null,
-    progress_percent: 100,
-
-    // Results
-    allocated_ips: {
-        ipv4: { l2: ["10.0.1.50"], l3: ["85.209.161.100", "85.209.161.101"] },
-        ipv6: { l2: ["2001:db8::50"], l3: ["2001:db8::100"] }
-    },
-    created_routes: [ObjectId, ObjectId],
-    created_policies: [ObjectId, ObjectId, ObjectId],
-
-    error_message: null,
-    error_step: null,
-
-    started_at: ISODate,
-    completed_at: ISODate,
-    created_at: ISODate,
-    created_by: ObjectId
-}
-
-// ─── provisioning_steps collection ───
-{
-    _id: ObjectId,
-    job_id: ObjectId,
-
-    step_order: 1,
-    step_name: "Allocate L2 IPv4",
-    step_type: "ipam",                          // ipam | route | neighbor | firewall | vip | verify
-
-    // Forward execution
-    status: "completed",                        // pending | running | completed | failed |
-                                                // compensating | compensated | compensation_failed
-    input_data: { pool_id: ObjectId, server_id: "ims-uuid-123" },
-    output_data: { ip_address: "10.0.1.50", assignment_id: ObjectId },
-    executed_at: ISODate,
-
-    // Compensating transaction (populated from output_data after forward step runs)
-    compensation: {
-        action: "ipam.release",
-        params: { ip_address: "10.0.1.50" },
-        idempotency_key: "comp-job-123-step-1", // Prevents double-release
-        status: "pending",                      // pending | running | completed | failed | skipped
-        attempted_at: null,
-        error: null
-    },
-
-    error_message: null,
-    retry_count: 0,
-    max_retries: 3                              // With exponential backoff + jitter
-}
-
-// ─── manual_intervention_queue collection ───
-// When a compensating action fails, it lands here for human resolution
-{
-    _id: ObjectId,
-    job_id: ObjectId,
-    step_id: ObjectId,
-    device_id: ObjectId,
-    cluster_id: ObjectId,
-    action_required: "Delete static route 85.209.161.100/32 via 10.0.1.50 from Edge-Router-01",
-    context: { /* full step document */ },
-    reason: "Router API unreachable during compensation",
-    assigned_to: null,
-    status: "open",                             // open | acknowledged | resolved
-    created_at: ISODate,
-    resolved_at: ISODate,
-    resolved_by: ObjectId
-}
-```
-
-### 10.5 Saga Execution Rules
-
-```
-FORWARD EXECUTION:
-  For each step (in order):
-    1. Set status = "running"
-    2. Execute forward action (via vendor adapter with retry/backoff)
-    3. On success:
-       - Set status = "completed"
-       - Populate compensation.params from output_data
-    4. On failure after max_retries:
-       - Set status = "failed"
-       - Trigger COMPENSATION SAGA
-
-COMPENSATION SAGA (reverse order of completed steps):
-  For each completed step (newest first):
-    1. Set compensation.status = "running"
-    2. Execute compensating action using compensation.params
-    3. On success: set compensation.status = "completed"
-    4. On failure:
-       - Set compensation.status = "failed"
-       - Add to manual_intervention_queue (do NOT stop)
-       - Continue compensating remaining steps
-    5. After all attempted: set job status = "compensated" or "partial_compensation"
-
-IDEMPOTENCY:
-  - Every forward and compensating action MUST be safe to call multiple times
-  - IP release: check if already released before attempting
-  - Route delete: check if route exists before attempting delete
-  - Use idempotency_key on all vendor API calls that support it
-```
-
----
-
-## 11. IMS Integration
-
-### 11.1 Integration Architecture
+### 10.1 Integration Architecture
 
 ```
 ┌─────────────────────┐                ┌─────────────────────┐
@@ -2225,68 +2021,26 @@ This is the complete hardware-to-network picture that neither system provides al
 | Ticketing / work queue | IMS (NMS creates tickets via M2M API) |
 | Users, roles, permissions | IMS (NMS reads JWT claims only) |
 
-### 11.2 Bidirectional Webhook Events
+### 10.2 Bidirectional Webhook Events
 
 **IMS → NMS Events:**
 | Event | Trigger | NMS Action |
 |-------|---------|------------|
-| `server.provision` | New server deployed | Start network provisioning saga |
-| `server.deprovision` | Server decommissioned | Start network deprovisioning saga |
-| `server.migrate` | Server moved to new rack | Update cable records, re-provision if needed |
 | `server.nic_change` | NIC replaced/added | Update MAC in IPAM + ARP/NDP entries |
 | `server.reboot` | Server rebooted | (Informational — no NMS action) |
 
 **NMS → IMS Events:**
 | Event | Trigger | IMS Action |
 |-------|---------|------------|
-| `network.provisioned` | Provisioning saga completed | Update server network_status = "configured" |
-| `network.deprovisioned` | Deprovisioning saga completed | Update server network_status = "unconfigured" |
-| `network.failed` | Provisioning saga failed | Flag server for manual review |
 | `ip.changed` | IP reassigned/rotated | Update server's IP references |
 | `drift.detected` | Out-of-band change found | (Informational for IMS audit log) |
 
-### 11.3 Integration Endpoints
+### 10.3 Integration Endpoints
 
 **NMS Endpoints for IMS:**
 ```
-POST /api/integration/ims/provision-network
-Request:
-{
-    "server_id": "ims-server-uuid",
-    "server_name": "web-server-01",
-    "mac_address": "AA:BB:CC:DD:EE:FF",
-    "datacenter": "DC1",
-    "rack_id": "rack-uuid",
-    "rack_unit": 38,
-    "address_families": ["ipv4", "ipv6"],
-    "l2_ip_count": 1,
-    "l3_ip_count": 2,
-    "firewall_rules": [
-        {"type": "inbound", "ports": [80, 443], "sources": ["any"]},
-        {"type": "outbound", "allow_all": true}
-    ]
-}
-Headers: X-Idempotency-Key: prov-{server_id}-{timestamp}
-Response:
-{
-    "success": true,
-    "provisioning_job_id": "job-uuid",
-    "allocated": {
-        "ipv4": { "l2_ips": ["10.0.1.50"], "l3_ips": ["85.209.161.100"] },
-        "ipv6": { "l2_ips": ["2001:db8::50"], "l3_ips": ["2001:db8::100"] },
-        "gateway": "10.0.1.1",
-        "firewall_policy_ids": ["policy-1", "policy-2"]
-    }
-}
-
-POST /api/integration/ims/deprovision-network
-Request: { "server_id": "ims-server-uuid" }
-
 GET  /api/integration/ims/server/{server_id}/network
 GET  /api/integration/ims/server/{server_id}/connections
-
-POST /api/integration/ims/validate-availability
-Request: { "datacenter": "DC1", "ipv4_l2": 1, "ipv4_l3": 5, "ipv6_l2": 1, "ipv6_l3": 2 }
 ```
 
 **IMS Endpoints Called by NMS:**
@@ -2302,7 +2056,7 @@ PUT  {IMS_URL}/api/tickets/{ticket_id}                  - Update ticket (resolve
 GET  {IMS_URL}/api/tickets/{ticket_id}                  - Read ticket state
 ```
 
-### 11.4 Shared Ticketing System
+### 10.4 Shared Ticketing System
 
 NMS does **not** have its own ticketing system. All human-actionable items are created as tickets in the IMS ticket system via M2M API calls. Engineers work from a single queue.
 
@@ -2310,9 +2064,7 @@ NMS does **not** have its own ticketing system. All human-actionable items are c
 
 | NMS Event | IMS Ticket Type | Trigger | Auto-close Trigger |
 |-----------|-----------------|---------|-------------------|
-| Provisioning step needs human action | `nms_intervention` | Manual intervention queue item created | Operator marks step complete in NMS |
 | Drift detected, resolution needs approval | `nms_drift` | Drift detected with `requires_approval: true` | Drift resolved or dismissed |
-| Provisioning saga failed (unrecoverable) | `nms_provision_failure` | All compensation steps exhausted | Operator manually resolves |
 | Device unreachable for >15 min | `nms_device_unreachable` | Circuit breaker open + health check failing | Device comes back online |
 
 **Ticket creation (M2M call from NMS):**
@@ -2320,49 +2072,33 @@ NMS does **not** have its own ticketing system. All human-actionable items are c
 ```json
 POST {IMS_URL}/api/tickets
 {
-    "type": "nms_intervention",
-    "title": "Provisioning step requires manual action: web-server-01",
-    "body": "Step 4 (firewall policy push) failed after 3 retries on DC1-FW-Cluster-01. Manual intervention required.",
-    "priority": "high",
+    "type": "nms_drift",
+    "title": "Configuration drift detected: DC1-Edge-Router-01",
+    "body": "Firewall rule added out-of-band on DC1-Edge-Router-01. Manual approval required before resolving.",
+    "priority": "medium",
     "source_system": "nms",
     "source_ref": {
-        "job_id": "prov-job-uuid",
-        "step": 4,
-        "device_id": "fw-cluster-uuid"
+        "drift_id": "drift-uuid",
+        "device_id": "router-uuid"
     },
     "assigned_group": "network-ops"
 }
 ```
 
-**Manual intervention queue in NMS:** The `manual_intervention_queue` collection stores the job context and step data. The `ims_ticket_id` field links back to the IMS ticket so status is bidirectional.
-
-```javascript
-// manual_intervention_queue document (updated with IMS ticket reference)
-{
-    job_id: ObjectId("..."),
-    step: 4,
-    device_id: ObjectId("..."),
-    reason: "firewall policy push failed",
-    ims_ticket_id: "ticket-uuid",    // <-- link to IMS ticket
-    status: "awaiting_operator",
-    created_at: ISODate("...")
-}
-```
-
 ---
 
-## 12. Authentication & Authorization
+## 11. Authentication & Authorization
 
 > Expanded from the original minimal auth section. Addresses: key rotation, token revocation, M2M tokens, secrets-backed key storage.
 
-### 12.1 JWT Token Strategy
+### 11.1 JWT Token Strategy
 
 **Token Types:**
 | Type | Audience (`aud`) | Lifetime | Use Case |
 |------|----------|----------|----------|
 | User Access Token | `nms` | 15 min | API requests from frontend |
 | User Refresh Token | `nms-refresh` | 7 days | One-time use, rotated on refresh |
-| M2M Token (IMS→NMS) | `nms-m2m` | 1 hour | IMS calling NMS provisioning APIs |
+| M2M Token (IMS→NMS) | `nms-m2m` | 1 hour | IMS calling NMS integration APIs |
 | M2M Token (NMS→IMS) | `ims-m2m` | 1 hour | NMS calling IMS webhook/server APIs |
 
 **Token Structure:**
@@ -2380,7 +2116,7 @@ POST {IMS_URL}/api/tickets
 }
 ```
 
-### 12.2 HMAC Key Management
+### 11.2 HMAC Key Management
 
 **Signing Key Location:** The HS256 signing key is stored in HashiCorp Vault at `nms/auth/jwt-signing-key` — **never** in `.env` or source code.
 
@@ -2394,7 +2130,7 @@ POST {IMS_URL}/api/tickets
 6. Rotation complete — downtime: zero
 ```
 
-### 12.3 Token Revocation (Redis Blocklist)
+### 11.3 Token Revocation (Redis Blocklist)
 
 On logout or credential compromise, token's `jti` (unique ID) is added to a Redis blocklist:
 
@@ -2408,14 +2144,14 @@ Every API request checks Redis blocklist before processing. Redis is **required*
 
 **Bulk Revocation:** To revoke all tokens for a user (e.g., password change), store `user:{user_id}:tokens_valid_after` in Redis with the current timestamp. Any token with `iat` before this timestamp is rejected.
 
-### 12.4 Machine-to-Machine (M2M) Authentication
+### 11.4 Machine-to-Machine (M2M) Authentication
 
 IMS and NMS communicate via M2M tokens:
 
 ```
-IMS → NMS (provisioning request):
+IMS → NMS (integration request):
   1. IMS requests M2M token from shared auth service (or generates locally with shared key)
-  2. Token has: aud: "nms-m2m", sub: "ims-service", permissions: ["nms.provision.*"]
+  2. Token has: aud: "nms-m2m", sub: "ims-service", permissions: ["nms.integration.*"]
   3. NMS validates: aud == "nms-m2m" AND issuer is trusted AND not in blocklist
   4. NMS checks M2M-specific permission set (more restrictive than admin)
 
@@ -2425,7 +2161,7 @@ NMS → IMS (webhook event):
   3. IMS validates aud == "ims-m2m"
 ```
 
-### 12.5 RBAC — Shared with IMS
+### 11.5 RBAC — Shared with IMS
 
 **Architecture:** IMS is the single source of truth for all users, roles, and permissions across both systems. NMS does **not** maintain its own users/roles database. At login, IMS issues a JWT containing the full permission set for both systems. NMS validates the JWT signature and reads the `permissions` claim locally — no RBAC DB lookups in NMS.
 
@@ -2452,7 +2188,6 @@ IMS owns:                          NMS does:
 "nms.firewall.read"       "nms.firewall.write"       "nms.firewall.sync"
 "nms.route.read"          "nms.route.write"           "nms.route.sync"
 "nms.topology.read"       "nms.topology.discover"
-"nms.provision.execute"   "nms.provision.rollback"
 "nms.drift.read"          "nms.drift.resolve"
 "nms.audit.read"          "nms.audit.export"
 "nms.vpn.read"            "nms.vpn.write"
@@ -2474,7 +2209,7 @@ if (!in_array($requiredPermission, $permissions)) {
 
 ---
 
-## 13. Complete Database Schema (MongoDB)
+## 12. Complete Database Schema (MongoDB)
 
 *All collections defined in preceding sections. Summary:*
 
@@ -2491,7 +2226,6 @@ if (!in_array($requiredPermission, $permissions)) {
 | **Topology** | connectivity_paths, topology_views, topology_snapshots |
 | **Audit** | audit_logs, device_config_changes |
 | **VPN** | vpn_gateways, vpn_tunnels, vpn_users |
-| **Provisioning** | provisioning_jobs, provisioning_steps, manual_intervention_queue |
 | **NICs** | server_nics |
 | **Auth** | *(none — owned by IMS; NMS reads JWT claims only)* |
 
@@ -2557,21 +2291,13 @@ db.audit_logs.createIndex({ "user_id": 1, "timestamp": -1 });
 db.audit_logs.createIndex({ "resource_type": 1, "resource_id": 1 });
 db.audit_logs.createIndex({ "expires_at": 1 }, { expireAfterSeconds: 0 });
 db.audit_logs.createIndex({ "idempotency_key": 1 }, { sparse: true });
-
-// Provisioning
-db.provisioning_jobs.createIndex({ "idempotency_key": 1 }, { unique: true, sparse: true });
-db.provisioning_jobs.createIndex({ "server_id": 1 });
-db.provisioning_jobs.createIndex({ "status": 1 });
-db.provisioning_steps.createIndex({ "job_id": 1, "step_order": 1 });
-db.manual_intervention_queue.createIndex({ "status": 1 });
 ```
 
 ---
 
-## 14. Complete API Reference
+## 13. Complete API Reference
 
 > **Single source of truth.** All endpoints defined here. No inline endpoint lists in other sections.
-> All mutating provisioning endpoints require `X-Idempotency-Key` header.
 > All endpoints use REST-style URLs: `/api/{resource}s` (plural nouns, not verbs).
 
 ### Authentication APIs
@@ -2754,17 +2480,6 @@ GET    /api/audit/logs/export        - Export logs (CSV/JSON)
 GET    /api/audit/changes/{resource} - Changes for resource
 ```
 
-### Provisioning APIs
-```
-POST   /api/provision/server         - Provision server network (requires X-Idempotency-Key)
-POST   /api/provision/deprovision    - Deprovision server network (requires X-Idempotency-Key)
-POST   /api/provision/jobs/{id}/compensate - Manually trigger compensation saga
-GET    /api/provision/jobs           - List jobs
-GET    /api/provision/jobs/{id}      - Job details with all steps + compensation status
-GET    /api/provision/manual-queue   - Open manual intervention items
-PUT    /api/provision/manual-queue/{id}/resolve - Mark manual item resolved
-```
-
 ### NIC APIs
 ```
 GET    /api/nics                           - List all server NICs (filterable by server, vlan, switch)
@@ -2783,18 +2498,15 @@ GET    /api/settings/redis/health    - Redis connectivity status
 
 ### IMS Integration APIs
 ```
-POST   /api/integration/ims/provision-network      - IMS triggers provisioning
-POST   /api/integration/ims/deprovision-network    - IMS triggers deprovisioning
 GET    /api/integration/ims/server/{id}/network     - Get network info for IMS server
 GET    /api/integration/ims/server/{id}/connections - Get physical connections for server
-POST   /api/integration/ims/validate-availability   - Check IP availability
 ```
 
 ---
 
-## 15. Frontend Specification
+## 14. Frontend Specification
 
-### 15.1 Technology Stack
+### 14.1 Technology Stack
 - **Rendering**: PHP server-rendered templates (no separate SPA build process)
 - **CSS Framework**: Tailwind CSS (via CDN or compiled with standalone CLI — no Node.js required for basic use)
 - **JS Reactivity**: Alpine.js — lightweight (16KB), Vue-like directives in HTML, handles dropdowns, modals, tab switching, form validation without a build step
@@ -2806,7 +2518,7 @@ POST   /api/integration/ims/validate-availability   - Check IP availability
 
 **Rationale:** Backend is PHP. Server-rendered templates eliminate a separate frontend build pipeline, reduce deployment complexity, and keep the stack uniform. Alpine.js covers all reactive UI needs (dynamic forms, modals, live data refresh) without JSX or a virtual DOM. D3.js/Cytoscape.js/Three.js work identically in plain HTML — they don't require React/Vue wrappers.
 
-### 15.2 Page Structure
+### 14.2 Page Structure
 
 ```
 /                           - Dashboard
@@ -2855,10 +2567,6 @@ POST   /api/integration/ims/validate-availability   - Check IP availability
 /vpn/tunnels                - Site-to-site tunnels
 /vpn/users                  - Remote access users
 
-/provision                  - Provisioning dashboard (active jobs, history)
-/provision/:id              - Job details with step-by-step progress + compensation status
-/provision/manual-queue     - Manual intervention queue
-
 /audit                      - Audit logs
 /audit/changes              - Configuration changes
 
@@ -2873,16 +2581,15 @@ POST   /api/integration/ims/validate-availability   - Check IP availability
 /nics/server/:ims_server_id - NICs for a specific server (connectivity + IP assignments)
 ```
 
-### 15.3 Dashboard Components
+### 14.3 Dashboard Components
 
 **Main Dashboard:**
 - System health overview (devices online/offline, cluster status)
 - Multi-site map (world/regional view with site status markers)
 - IPAM utilization charts (per pool, per address family)
 - Active drift alerts (devices with open drifts)
-- Recent provisioning jobs (with status indicators)
 - Recent audit entries
-- Quick actions (Provision, Add Device, Add Cable, etc.)
+- Quick actions (Add Device, Add Cable, etc.)
 
 **Topology View:**
 - Interactive network diagram (logical connections)
@@ -2900,7 +2607,7 @@ POST   /api/integration/ims/validate-availability   - Check IP availability
 - Cross-rack connections visualized
 - Empty rack slots highlighted
 
-### 15.4 UI Structure (PHP Templates + Alpine.js)
+### 14.4 UI Structure (PHP Templates + Alpine.js)
 
 ```
 views/
@@ -2957,10 +2664,6 @@ views/
 ├── vpn/
 │   ├── tunnels.php
 │   └── users.php
-├── provision/
-│   ├── index.php          - Job dashboard
-│   ├── show.php           - Step-by-step saga progress
-│   └── manual-queue.php   - Operator intervention queue
 ├── audit/
 │   └── index.php
 └── settings/
@@ -2979,7 +2682,7 @@ js/
 
 ---
 
-## 16. Project Structure
+## 15. Project Structure
 
 ```
 nms/
@@ -3009,8 +2712,6 @@ nms/
 │   │   ├── monitoring/              # Zabbix proxy endpoints
 │   │   ├── vpn/
 │   │   ├── audit/
-│   │   ├── provision/
-│   │   │   └── manual-queue/
 │   │   ├── settings/
 │   │   ├── nics/                    # NIC management endpoints
 │   │   └── integration/
@@ -3081,10 +2782,6 @@ nms/
 │       │   └── LinkDiscovery.php
 │       ├── monitoring/
 │       │   └── ZabbixClient.php
-│       ├── provisioning/
-│       │   ├── ProvisioningEngine.php
-│       │   ├── SagaExecutor.php      # Saga pattern orchestration
-│       │   └── CompensationRunner.php # Reverse compensation execution
 │       ├── drift/
 │       │   └── DriftDetector.php     # Section-by-section config comparison
 │       └── secrets/
@@ -3145,7 +2842,6 @@ nms/
 │   ├── topology/
 │   ├── nics/
 │   ├── vpn/
-│   ├── provision/
 │   ├── audit/
 │   └── settings/
 │
@@ -3172,7 +2868,7 @@ nms/
 
 ---
 
-## 17. Implementation Phases
+## 16. Implementation Phases
 
 > Rewritten with: explicit dependencies, exit criteria per phase, testing embedded in every phase (no standalone "testing" phase), risk gates at critical integration points.
 
@@ -3339,7 +3035,7 @@ nms/
 - IPv6 workflow: direct address policy (NO VIP, NO NAT)
 - BGP session monitoring (read-only polling from devices)
 - OSPF neighbor monitoring (read-only)
-- BGP conflict checker for pre-provisioning
+- BGP conflict checker for static route creation
 
 **Testing:**
 - Unit tests: IPv4 policy builder creates VIP + NAT policy
@@ -3361,46 +3057,28 @@ nms/
 
 ---
 
-### Phase 6: Provisioning & Integration
+### Phase 6: IMS Integration & NIC Management
 
 **Dependencies:** Phase 4 (IPAM), Phase 5 (Network Config)
 
 **Work:**
-- Saga executor engine (forward execution + compensation saga)
-- Two-phase pre-validation (Phase 0: reachability + availability check before mutations)
-- Provisioning job management (with idempotency keys)
-- Provisioning step tracking with per-step compensation blocks
-- Manual intervention queue for failed compensations
-- Full server provisioning workflow (dual-stack: IPv4 + IPv6 tracks)
-- Server deprovisioning workflow
-- IMS integration endpoints (provision, deprovision, validate, connections)
+- IMS integration endpoints (server network info, physical connections)
 - Bidirectional webhook event delivery (NMS→IMS, IMS→NMS)
 - `server_nics` collection setup + `NicManager.php`
 - NIC sync on `server.nic_change` webhook (update MAC, port, VLAN, IP links)
 - NIC API endpoints (`/api/nics/*`)
-- Ticket creation via IMS M2M API for manual_intervention_queue items (`ImsTicketClient.php`)
+- Full `ImsTicketClient.php` implementation (drift tickets, device unreachable tickets)
+- `ip.changed` and `drift.detected` webhook events to IMS
 
 **Testing:**
-- Unit tests: saga executor runs steps in order, populates compensation params
-- Unit tests: compensation saga runs in reverse order on failure
-- **Critical integration test: provision → intentionally fail step 4 → verify steps 1-3 are compensated (IPs released, routes deleted)**
-- **Critical integration test: compensation failure → verify item added to manual intervention queue**
-- Integration test: idempotency key returns same response on duplicate request
-- Integration test: full provisioning → deprovisioning cycle end-to-end
 - Integration test: IMS webhook event delivery (mock IMS endpoint)
-
-**> RISK GATE: First end-to-end provisioning.** Before proceeding, a complete provisioning cycle must succeed against at least one real device: allocate IP → create route → create firewall rule → verify → deprovision → verify cleanup. This validates the entire saga pipeline.
+- Integration test: `server.nic_change` webhook updates `server_nics` correctly
 
 **Exit Criteria:**
-- [ ] Full provisioning saga completes successfully (IPv4 + IPv6)
-- [ ] Failed provisioning triggers compensation saga in correct reverse order
-- [ ] Failed compensation items appear in manual intervention queue
-- [ ] Pre-validation catches unreachable devices before any mutation
-- [ ] Idempotency keys prevent duplicate provisioning
-- [ ] IMS webhook events are sent on provision/deprovision completion
 - [ ] NIC sync on `server.nic_change` webhook updates server_nics correctly
-- [ ] Manual intervention queue items create tickets in IMS ticket system via M2M
-- [ ] At least one full provision→deprovision cycle works against a real device
+- [ ] `GET /api/integration/ims/server/{id}/network` returns correct IP/firewall info
+- [ ] `GET /api/integration/ims/server/{id}/connections` returns physical path
+- [ ] IMS ticket creation works for `nms_drift` and `nms_device_unreachable` types
 - [ ] All Phase 6 tests pass
 
 ---
@@ -3503,14 +3181,12 @@ nms/
 - BGP monitoring dashboard
 - Topology visualization (Cytoscape.js — logical + physical, with cluster grouping)
 - **NIC management UI** (NIC overview, per-server NIC + connectivity + IP view)
-- Provisioning dashboard (job progress, step timeline, manual intervention queue)
 - Monitoring dashboard (Zabbix health data)
 - Audit log viewer
 - Settings pages (Zabbix config, Vault health, vendor configs) — **no user/role pages (IMS owns those)**
 
 **Testing:**
 - E2E tests: login → navigate → create device → view in topology
-- E2E tests: provision server → track job progress in UI → verify completion
 - E2E tests: drift detected → view diff → resolve in UI
 - E2E test: server NIC change webhook → NIC record updates in UI
 
@@ -3520,7 +3196,6 @@ nms/
 - [ ] Rack elevation view shows device placement with patch panels
 - [ ] Cable trace shows full path through patch panels
 - [ ] NIC page shows server → cable → switch port connectivity correctly
-- [ ] Provisioning job progress is visible in real-time
 - [ ] All E2E tests pass
 
 ---
@@ -3539,17 +3214,15 @@ This NMS provides a comprehensive infrastructure architecture and configuration 
 
 5. **Firewall Automation** — IPv4 policies with VIP/NAT, IPv6 policies with direct address matching. Centralized management with device synchronization.
 
-6. **Saga-Based Provisioning** — Multi-step provisioning with per-step compensating transactions, two-phase pre-validation, idempotency keys, and manual intervention queue for failed rollbacks.
+6. **Configuration Drift Detection** — Periodic section-by-section comparison against live device state, with push/pull/ignore resolution workflow.
 
-7. **Configuration Drift Detection** — Periodic section-by-section comparison against live device state, with push/pull/ignore resolution workflow.
+7. **Infrastructure Visualization** — Interactive topology mapping with physical rack views, cable tracing through patch panels, and pre-computed path materialization.
 
-8. **Infrastructure Visualization** — Interactive topology mapping with physical rack views, cable tracing through patch panels, and pre-computed path materialization.
+8. **IMS Synergy** — Bidirectional webhook integration. Combined with IMS, provides the complete hardware-to-network picture: which server is in which rack, connected to which port through which patch panel, with which IPs and firewall rules. Shared RBAC (IMS-owned) and shared ticketing (IMS-owned) eliminate duplicated infrastructure across the two systems.
 
-9. **IMS Synergy** — Bidirectional webhook integration. Combined with IMS, provides the complete hardware-to-network picture: which server is in which rack, connected to which port through which patch panel, with which IPs and firewall rules. Shared RBAC (IMS-owned) and shared ticketing (IMS-owned) eliminate duplicated infrastructure across the two systems.
+9. **NIC Tracking** — `server_nics` collection maps each server NIC to its switch port, VLAN, cable, and IP assignments. The missing link between IMS (physical NIC hardware) and NMS (network config): cable path from NIC → patch panel → switch port.
 
-10. **NIC Tracking** — `server_nics` collection maps each server NIC to its switch port, VLAN, cable, and IP assignments. The missing link between IMS (physical NIC hardware) and NMS (network config): cable path from NIC → patch panel → switch port.
-
-11. **Production-Ready Auth** — JWT with key rotation, Redis-backed revocation, M2M tokens for IMS integration. RBAC is **shared with IMS**: permissions embedded in JWT, no separate auth DB in NMS.
+10. **Production-Ready Auth** — JWT with key rotation, Redis-backed revocation, M2M tokens for IMS integration. RBAC is **shared with IMS**: permissions embedded in JWT, no separate auth DB in NMS.
 
 11. **Secrets Management** — Device credentials never stored in MongoDB. Vault references only, with provider abstraction layer.
 

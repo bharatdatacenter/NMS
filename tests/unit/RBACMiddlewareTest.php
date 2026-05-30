@@ -30,11 +30,11 @@ class RBACMiddlewareTest extends TestCase
 
     public function testGrantsAccessWithWildcardPermission(): void
     {
-        $claims = $this->makeClaims(['nms.provision.*']);
+        $claims = $this->makeClaims(['nms.device.*']);
 
         $this->expectNotToPerformAssertions();
-        RBACMiddleware::handle($claims, 'nms.provision.execute');
-        RBACMiddleware::handle($claims, 'nms.provision.rollback');
+        RBACMiddleware::handle($claims, 'nms.device.read');
+        RBACMiddleware::handle($claims, 'nms.device.write');
     }
 
     public function testDeniesAccessWithoutPermission(): void

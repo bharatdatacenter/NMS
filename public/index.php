@@ -47,7 +47,7 @@ if (str_contains($acceptHeader, 'text/html') || str_starts_with($uri, '/views/')
         '/devices'    => 'devices/index',
         '/topology'   => 'topology/logical',
         '/ipam'       => 'ipam/index',
-        '/provision'  => 'provision/index',
+
         '/drift'      => 'drift/index',
         '/audit'      => 'audit/index',
         '/settings'   => 'settings/index',

@@ -8,8 +8,6 @@ declare(strict_types=1);
  * Receive webhook events from IMS and dispatch to the appropriate handler.
  *
  * Supported events:
- *   server.provision   — IMS deployed a server; start network provisioning saga
- *   server.deprovision — IMS decommissioned a server; start deprovisioning saga
  *   server.migrate     — Server moved to new rack; update cable records
  *   server.nic_change  — NIC replaced or added; update server_nics collection
  *   server.reboot      — Informational; no NMS action
@@ -20,8 +18,6 @@ declare(strict_types=1);
  */
 
 use NMS\Core\Models\Nics\NicManager;
-use NMS\Core\Models\Provisioning\ProvisioningEngine;
-use NMS\Core\Models\Provisioning\SagaExecutor;
 use NMS\Core\Helpers\Response;
 use NMS\Core\Helpers\Logger;
 
@@ -56,63 +52,6 @@ try {
                 'event'   => $event,
                 'synced'  => count($nics),
             ]);
-            break;
-
-        // ── server.provision ─────────────────────────────────────────────────
-        case 'server.provision':
-            $idempotencyKey = 'webhook-provision-' . $serverId . '-' . ($payload['timestamp'] ?? time());
-            $provisionData  = array_merge($payload, [
-                'server_id'      => $serverId,
-                'request_source' => 'ims_webhook',
-            ]);
-
-            $engine = new ProvisioningEngine();
-            $errors = $engine->validatePhase0($provisionData);
-
-            if (!empty($errors)) {
-                $logger->warning('server.provision webhook: phase 0 validation failed', [
-                    'server_id' => $serverId,
-                    'errors'    => $errors,
-                ]);
-                Response::json([
-                    'success'    => false,
-                    'event'      => $event,
-                    'message'    => 'Pre-validation failed',
-                    'validation' => $errors,
-                ], 422);
-            }
-
-            $job = $engine->provisionServer($provisionData, $idempotencyKey, 'ims-webhook');
-
-            if (!empty($job->steps)) {
-                $executor = new SagaExecutor();
-                $executor->execute($job);
-            }
-
-            Response::json([
-                'success'             => true,
-                'event'               => $event,
-                'provisioning_job_id' => $job->jobId,
-            ], 202);
-            break;
-
-        // ── server.deprovision ───────────────────────────────────────────────
-        case 'server.deprovision':
-            $idempotencyKey = 'webhook-deprovision-' . $serverId . '-' . ($payload['timestamp'] ?? time());
-
-            $engine = new ProvisioningEngine();
-            $job    = $engine->deprovisionServer($serverId, $idempotencyKey, 'ims-webhook');
-
-            if (!empty($job->steps)) {
-                $executor = new SagaExecutor();
-                $executor->execute($job);
-            }
-
-            Response::json([
-                'success'             => true,
-                'event'               => $event,
-                'provisioning_job_id' => $job->jobId,
-            ], 202);
             break;
 
         // ── server.migrate ───────────────────────────────────────────────────

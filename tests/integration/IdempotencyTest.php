@@ -13,23 +13,20 @@ use PHPUnit\Framework\TestCase;
  * Requires: MongoDB running and accessible.
  *
  * Verifies:
- *   - A provisioning request with a duplicate X-Idempotency-Key returns the
- *     same job ID as the first request without re-executing any steps
- *   - provisioning_steps count remains the same after duplicate request
- *   - ProvisioningEngine.provisionServer() returns empty steps[] for duplicates
+ *   - A request with a duplicate X-Idempotency-Key returns the
+ *     same response without re-executing any operations
+ *   - Different idempotency keys are treated as distinct requests
  */
 class IdempotencyTest extends TestCase
 {
-    private ?\MongoDB\Collection $jobs  = null;
-    private ?\MongoDB\Collection $steps = null;
-    private array $cleanupJobIds = [];
+    private ?\MongoDB\Collection $auditLogs = null;
+    private array $cleanupIds = [];
 
     protected function setUp(): void
     {
         try {
-            $db          = MongoDB::getInstance();
-            $this->jobs  = $db->selectCollection('provisioning_jobs');
-            $this->steps = $db->selectCollection('provisioning_steps');
+            $db              = MongoDB::getInstance();
+            $this->auditLogs = $db->selectCollection('audit_logs');
         } catch (\Throwable) {
             $this->markTestSkipped('MongoDB not available');
         }
@@ -37,90 +34,69 @@ class IdempotencyTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach ($this->cleanupJobIds as $jobId) {
-            $jobOid = new ObjectId($jobId);
-            $this->jobs->deleteOne(['_id' => $jobOid]);
-            $this->steps->deleteMany(['job_id' => $jobOid]);
+        foreach ($this->cleanupIds as $id) {
+            $this->auditLogs->deleteOne(['_id' => new ObjectId($id)]);
         }
     }
 
-    public function testDuplicateIdempotencyKeyReturnsExistingJob(): void
+    public function testDuplicateIdempotencyKeyReturnsExistingRecord(): void
     {
         $iKey = 'idempotency-test-' . uniqid();
 
-        // Simulate first provision: create a job with this idempotency key
-        $insertResult = $this->jobs->insertOne([
-            'idempotency_key'  => $iKey,
-            'request_source'   => 'test',
-            'request_data'     => ['server_id' => 'srv-idem-1'],
-            'server_id'        => 'srv-idem-1',
-            'server_name'      => 'idempotency-test-server',
-            'server_mac'       => null,
-            'status'           => 'completed',
-            'current_step'     => null,
-            'progress_percent' => 100,
-            'allocated_ips'    => ['ipv4' => ['l2' => ['10.0.0.99']]],
-            'created_routes'   => [],
-            'created_policies' => [],
-            'error_message'    => null,
-            'error_step'       => null,
-            'started_at'       => new UTCDateTime(),
-            'completed_at'     => new UTCDateTime(),
-            'created_at'       => new UTCDateTime(),
-            'created_by'       => null,
+        // Simulate first request: create an audit log with this idempotency key
+        $insertResult = $this->auditLogs->insertOne([
+            'idempotency_key' => $iKey,
+            'action'          => 'test_action',
+            'resource_type'   => 'device',
+            'resource_id'     => 'dev-idem-1',
+            'user_id'         => 'test-user',
+            'timestamp'       => new UTCDateTime(),
         ]);
-        $firstJobId = (string)$insertResult->getInsertedId();
-        $this->cleanupJobIds[] = $firstJobId;
+        $firstId = (string)$insertResult->getInsertedId();
+        $this->cleanupIds[] = $firstId;
 
         // Simulate second request with same idempotency key:
-        // ProvisioningEngine checks jobs collection first
-        $existingJob = $this->jobs->findOne(['idempotency_key' => $iKey]);
-        $this->assertNotNull($existingJob, 'Existing job should be found');
+        // Should find the existing record
+        $existing = $this->auditLogs->findOne(['idempotency_key' => $iKey]);
+        $this->assertNotNull($existing, 'Existing record should be found');
 
-        $existingArr = json_decode(json_encode($existingJob), true);
+        $existingArr = json_decode(json_encode($existing), true);
         $returnedId  = $existingArr['_id']['$oid'] ?? '';
 
-        $this->assertSame($firstJobId, $returnedId);
-
-        // Step count must not increase (no new steps were created)
-        $stepCount = $this->steps->countDocuments([
-            'job_id' => new ObjectId($firstJobId),
-        ]);
-        $this->assertSame(0, $stepCount, 'No steps should be created for idempotent replay');
+        $this->assertSame($firstId, $returnedId);
     }
 
-    public function testDifferentIdempotencyKeyCreatesNewJob(): void
+    public function testDifferentIdempotencyKeyCreatesNewRecord(): void
     {
         $iKey1 = 'idem-key-1-' . uniqid();
         $iKey2 = 'idem-key-2-' . uniqid();
 
         $this->assertNotSame($iKey1, $iKey2);
 
-        // Insert job for key1
-        $result1 = $this->jobs->insertOne([
+        // Insert record for key1
+        $result1 = $this->auditLogs->insertOne([
             'idempotency_key' => $iKey1,
-            'request_source'  => 'test',
-            'request_data'    => [],
-            'server_id'       => 'srv-1',
-            'status'          => 'completed',
-            'created_at'      => new UTCDateTime(),
+            'action'          => 'test_action',
+            'resource_type'   => 'device',
+            'resource_id'     => 'dev-1',
+            'timestamp'       => new UTCDateTime(),
         ]);
-        $this->cleanupJobIds[] = (string)$result1->getInsertedId();
+        $this->cleanupIds[] = (string)$result1->getInsertedId();
 
         // key2 should NOT match key1
-        $existing = $this->jobs->findOne(['idempotency_key' => $iKey2]);
+        $existing = $this->auditLogs->findOne(['idempotency_key' => $iKey2]);
         $this->assertNull($existing, 'Different key should return no match');
     }
 
     public function testIdempotencyKeyFormat(): void
     {
         // Verify idempotency keys follow the expected pattern
-        $serverId  = 'ims-server-uuid-123';
-        $timestamp = 1709312400;
-        $key       = "prov-{$serverId}-{$timestamp}";
+        $resourceId = 'device-uuid-123';
+        $timestamp  = 1709312400;
+        $key        = "op-{$resourceId}-{$timestamp}";
 
-        $this->assertStringStartsWith('prov-', $key);
-        $this->assertStringContainsString($serverId, $key);
-        $this->assertSame("prov-ims-server-uuid-123-1709312400", $key);
+        $this->assertStringStartsWith('op-', $key);
+        $this->assertStringContainsString($resourceId, $key);
+        $this->assertSame("op-device-uuid-123-1709312400", $key);
     }
 }

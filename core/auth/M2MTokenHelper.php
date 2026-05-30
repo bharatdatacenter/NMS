@@ -12,7 +12,7 @@ use stdClass;
  * Machine-to-Machine token issuance and validation.
  *
  * Token types:
- *  - aud: "nms-m2m"  — IMS → NMS (inbound provisioning requests)
+ *  - aud: "nms-m2m"  — IMS → NMS (inbound integration requests)
  *  - aud: "ims-m2m"  — NMS → IMS (outbound webhook/ticket calls)
  */
 class M2MTokenHelper
@@ -52,7 +52,7 @@ class M2MTokenHelper
             'aud'         => 'nms-m2m',
             'exp'         => time() + 3600,
             'type'        => 'm2m',
-            'permissions' => $permissions ?: ['nms.provision.*', 'nms.device.read'],
+            'permissions' => $permissions ?: ['nms.device.read', 'nms.nic.write'],
         ]);
     }
 
@@ -94,7 +94,7 @@ class M2MTokenHelper
 
     /**
      * Check if a permission is present in M2M token claims.
-     * Supports wildcard patterns like "nms.provision.*".
+     * Supports wildcard patterns like "nms.device.*".
      */
     public function hasPermission(stdClass $claims, string $required): bool
     {
@@ -104,7 +104,7 @@ class M2MTokenHelper
             if ($perm === $required) {
                 return true;
             }
-            // Wildcard match: "nms.provision.*" matches "nms.provision.execute"
+            // Wildcard match: "nms.device.*" matches "nms.device.read"
             if (str_ends_with($perm, '.*')) {
                 $prefix = substr($perm, 0, -2);
                 if (str_starts_with($required, $prefix . '.')) {

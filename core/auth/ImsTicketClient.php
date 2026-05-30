@@ -12,9 +12,7 @@ namespace NMS\Core\Auth;
  * are created as tickets in IMS and worked from a single engineer queue.
  *
  * NMS ticket types (registered in IMS):
- *   nms_intervention        — Provisioning step requires manual action
  *   nms_drift               — Drift detected, requires operator approval
- *   nms_provision_failure   — All compensation steps exhausted
  *   nms_device_unreachable  — Device unreachable for >15 min (circuit breaker open)
  *
  * Authentication:
@@ -27,7 +25,7 @@ namespace NMS\Core\Auth;
  *
  * Error handling:
  *   Throws \RuntimeException on HTTP errors or IMS-side failures.
- *   Callers (CompensationRunner, DriftDetector) should catch and log — ticket
+ *   Callers (DriftDetector) should catch and log — ticket
  *   creation failure must never block the primary operation.
  */
 class ImsTicketClient
@@ -36,9 +34,7 @@ class ImsTicketClient
     private string $imsApiUrl;
 
     private const VALID_TYPES = [
-        'nms_intervention',
         'nms_drift',
-        'nms_provision_failure',
         'nms_device_unreachable',
     ];
 
@@ -209,8 +205,6 @@ class ImsTicketClient
     private function priorityForType(string $type): string
     {
         return match ($type) {
-            'nms_provision_failure'   => 'critical',
-            'nms_intervention'        => 'high',
             'nms_device_unreachable'  => 'high',
             'nms_drift'               => 'medium',
             default                   => 'medium',

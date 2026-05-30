@@ -22,8 +22,6 @@ class VyOSAdapter extends VendorAdapter
 
     private const ALLOWED_COMMANDS = [
         'show interfaces',
-        'show ip route',
-        'show ip bgp summary',
         'ping',
         'traceroute',
     ];
@@ -126,96 +124,6 @@ class VyOSAdapter extends VendorAdapter
                 } catch (\Exception) {}
             }
             return false;
-        });
-    }
-
-    // ─── Routing ──────────────────────────────────────────────────────────────
-
-    public function getRoutes(string $family = 'ipv4'): array
-    {
-        return $this->call(function () use ($family): array {
-            $protocol = $family === 'ipv6' ? 'protocols static route6' : 'protocols static route';
-            try {
-                $routes = $this->api->retrieve($protocol, 'listNodes');
-                if (!is_array($routes)) {
-                    return [];
-                }
-
-                $result = [];
-                foreach ($routes as $dest) {
-                    try {
-                        $nextHops = $this->api->retrieve("{$protocol} {$dest} next-hop", 'listNodes');
-                        $nextHops = is_array($nextHops) ? $nextHops : [$nextHops];
-                        foreach ((array)$nextHops as $gw) {
-                            $result[] = [
-                                'destination' => $dest,
-                                'gateway'     => $gw,
-                                'protocol'    => 'static',
-                                'active'      => true,
-                                'disabled'    => false,
-                            ];
-                        }
-                    } catch (\Exception) {
-                        $result[] = [
-                            'destination' => $dest,
-                            'gateway'     => null,
-                            'protocol'    => 'static',
-                            'active'      => true,
-                            'disabled'    => false,
-                        ];
-                    }
-                }
-                return $result;
-            } catch (\Exception) {
-                return [];
-            }
-        });
-    }
-
-    public function addStaticRoute(string $destination, string $gateway, ?string $interface = null): bool
-    {
-        return $this->call(function () use ($destination, $gateway, $interface): bool {
-            $family = str_contains($destination, ':') ? 'route6' : 'route';
-            return $this->api->set("protocols static {$family} {$destination} next-hop {$gateway}");
-        });
-    }
-
-    public function removeRoute(string $destination): bool
-    {
-        return $this->call(function () use ($destination): bool {
-            $family = str_contains($destination, ':') ? 'route6' : 'route';
-            return $this->api->delete("protocols static {$family} {$destination}");
-        });
-    }
-
-    // ─── Neighbor Table ───────────────────────────────────────────────────────
-
-    public function getNeighborTable(string $protocol = 'arp'): array
-    {
-        return $this->call(function () use ($protocol): array {
-            $command = $protocol === 'ndp' ? 'ipv6 neighbors' : 'arp';
-            try {
-                $raw = $this->api->show($command);
-                $output = is_array($raw) ? ($raw['output'] ?? '') : (string)$raw;
-                return $this->parseArpOutput($output, $protocol);
-            } catch (\Exception) {
-                return [];
-            }
-        });
-    }
-
-    public function addStaticNeighbor(string $ip, string $mac, string $interface): bool
-    {
-        return $this->call(function () use ($ip, $mac, $interface): bool {
-            // VyOS static ARP
-            return $this->api->set("protocols static arp {$ip} hwaddr", $mac);
-        });
-    }
-
-    public function removeNeighbor(string $ip): bool
-    {
-        return $this->call(function () use ($ip): bool {
-            return $this->api->delete("protocols static arp {$ip}");
         });
     }
 
@@ -375,52 +283,9 @@ class VyOSAdapter extends VendorAdapter
     {
         return $this->call(function (): array {
             return [
-                'routes'     => $this->getRoutes('ipv4'),
                 'firewall'   => $this->getFirewallRules(),
-                'arp'        => $this->getNeighborTable('arp'),
                 'interfaces' => $this->getInterfaces(),
             ];
-        });
-    }
-
-    // ─── BGP / OSPF ───────────────────────────────────────────────────────────
-
-    public function getBGPSessions(): array
-    {
-        return $this->call(function (): array {
-            try {
-                $raw    = $this->api->show('ip bgp summary');
-                $output = is_array($raw) ? ($raw['output'] ?? '') : (string)$raw;
-                return $this->parseBGPSummary($output);
-            } catch (\Exception) {
-                return [];
-            }
-        });
-    }
-
-    public function getBGPPrefixesForRange(string $cidr): array
-    {
-        return $this->call(function () use ($cidr): array {
-            try {
-                $raw    = $this->api->show("ip bgp {$cidr}");
-                $output = is_array($raw) ? ($raw['output'] ?? '') : (string)$raw;
-                return [['cidr' => $cidr, 'output' => $output]];
-            } catch (\Exception) {
-                return [];
-            }
-        });
-    }
-
-    public function getOSPFNeighbors(): array
-    {
-        return $this->call(function (): array {
-            try {
-                $raw    = $this->api->show('ip ospf neighbor');
-                $output = is_array($raw) ? ($raw['output'] ?? '') : (string)$raw;
-                return [['output' => $output]];
-            } catch (\Exception) {
-                return [];
-            }
         });
     }
 
@@ -472,55 +337,4 @@ class VyOSAdapter extends VendorAdapter
         return self::ALLOWED_COMMANDS;
     }
 
-    // ─── Helpers ──────────────────────────────────────────────────────────────
-
-    /**
-     * Parse plain-text ARP/NDP output into structured entries.
-     * This is a best-effort text parser for `show arp` output.
-     */
-    private function parseArpOutput(string $output, string $protocol): array
-    {
-        if (empty($output)) {
-            return [];
-        }
-        $entries = [];
-        foreach (explode("\n", $output) as $line) {
-            $line = trim($line);
-            // Typical format: "? (192.168.1.1) at aa:bb:cc:dd:ee:ff [ether] on eth0"
-            if (preg_match('/\(([^\)]+)\)\s+at\s+([0-9a-f:]+)/i', $line, $m)) {
-                $entries[] = [
-                    'ip'        => $m[1],
-                    'mac'       => strtoupper($m[2]),
-                    'interface' => null,
-                    'protocol'  => $protocol,
-                    'dynamic'   => true,
-                ];
-            }
-        }
-        return $entries;
-    }
-
-    /**
-     * Parse BGP summary output into structured entries.
-     */
-    private function parseBGPSummary(string $output): array
-    {
-        if (empty($output)) {
-            return [];
-        }
-        $sessions = [];
-        foreach (explode("\n", $output) as $line) {
-            $line = trim($line);
-            // Match: "192.168.1.1    4      65001  ...  Established"
-            if (preg_match('/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+\d+\s+(\d+)\s+.*?(Established|Active|Idle|Connect)/i', $line, $m)) {
-                $sessions[] = [
-                    'remote_address' => $m[1],
-                    'remote_as'      => $m[2],
-                    'state'          => strtolower($m[3]),
-                    'established'    => strtolower($m[3]) === 'established',
-                ];
-            }
-        }
-        return $sessions;
-    }
 }

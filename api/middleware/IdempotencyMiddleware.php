@@ -12,7 +12,7 @@ use Predis\Client as RedisClient;
  *
  * On first request: execute normally, cache response for 24h.
  * On duplicate request with same key: return cached response immediately.
- * Prevents double-provisioning, double-release, etc.
+ * Prevents double-execution, double-release, etc.
  */
 class IdempotencyMiddleware
 {

@@ -17,7 +17,7 @@ class RBACMiddleware
 {
     /**
      * Check that the authenticated user has the required permission.
-     * Supports wildcard permissions like "nms.provision.*".
+     * Supports wildcard permissions like "nms.device.*".
      *
      * @param stdClass $claims           Decoded JWT claims from AuthMiddleware
      * @param string   $requiredPerm     Permission string to check

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace NMS\Core\Models\Devices;
 
 use NMS\Core\Models\Secrets\SecretsManagerInterface;
+use NMS\Vendors\Aruba\ArubaAdapter;
+use NMS\Vendors\Cisco\CiscoAdapter;
 use NMS\Vendors\FortiGate\FortiGateAdapter;
 use NMS\Vendors\MikroTik\MikroTikAdapter;
 use NMS\Vendors\VyOS\VyOSAdapter;
@@ -38,6 +40,8 @@ class DeviceFactory
             'mikrotik'  => new MikroTikAdapter($device, $secrets, $redis),
             'fortigate' => new FortiGateAdapter($device, $secrets, $redis),
             'vyos'      => new VyOSAdapter($device, $secrets, $redis),
+            'cisco'     => new CiscoAdapter($device, $secrets, $redis),
+            'aruba'     => new ArubaAdapter($device, $secrets, $redis),
             default     => null,
         };
     }
@@ -47,7 +51,7 @@ class DeviceFactory
      */
     public static function isSupported(string $vendor): bool
     {
-        return in_array($vendor, ['mikrotik', 'fortigate', 'vyos'], true);
+        return in_array($vendor, self::supportedVendors(), true);
     }
 
     /**
@@ -55,7 +59,7 @@ class DeviceFactory
      */
     public static function supportedVendors(): array
     {
-        return ['mikrotik', 'fortigate', 'vyos'];
+        return ['mikrotik', 'fortigate', 'vyos', 'cisco', 'aruba'];
     }
 
     // ─── Private ──────────────────────────────────────────────────────────────

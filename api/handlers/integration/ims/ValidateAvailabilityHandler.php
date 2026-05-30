@@ -5,34 +5,48 @@ declare(strict_types=1);
 /**
  * POST /api/integration/ims/validate-availability
  *
- * Read-only check: can we provision a server with the given requirements?
- * Validates pool availability, device reachability, BGP conflicts, cluster health.
+ * Read-only check: validates IPAM pool availability and device reachability.
  * Returns immediately — no mutations.
  *
  * Body: {
- *   datacenter?, ipv4_l2?, ipv4_l3?, ipv6_l2?, ipv6_l3?,
- *   device_id?, cluster_id?, mac_address?,
- *   pool_id_ipv4_l2?, pool_id_ipv4_l3?, pool_id_ipv6_l2?, pool_id_ipv6_l3?,
- *   address_families?
+ *   pool_id?, ip_version?, device_id?, cluster_id?
  * }
  */
 
-use NMS\Core\Models\Provisioning\ProvisioningEngine;
+use NMS\Core\Database\MongoDB;
 use NMS\Core\Helpers\Response;
 
 try {
-    // Build a request-like array for validatePhase0
-    $validationRequest = array_merge($body, [
-        'address_families' => $body['address_families'] ?? array_filter([
-            !empty($body['ipv4_l2']) || !empty($body['ipv4_l3']) ? 'ipv4' : null,
-            !empty($body['ipv6_l2']) || !empty($body['ipv6_l3']) ? 'ipv6' : null,
-        ]),
-        'l2_ip_count' => (int)($body['ipv4_l2'] ?? $body['l2_ip_count'] ?? 1),
-        'l3_ip_count' => (int)($body['ipv4_l3'] ?? $body['l3_ip_count'] ?? 1),
-    ]);
+    $db     = MongoDB::getInstance();
+    $errors = [];
 
-    $engine = new ProvisioningEngine();
-    $errors = $engine->validatePhase0($validationRequest);
+    // Check pool availability if pool_id provided
+    if (!empty($body['pool_id'])) {
+        $pool = $db->selectCollection('ip_pools')->findOne([
+            '_id' => new \MongoDB\BSON\ObjectId($body['pool_id']),
+        ]);
+        if (!$pool) {
+            $errors[] = 'Pool not found: ' . $body['pool_id'];
+        } else {
+            $used  = (int)($pool['used_count'] ?? 0);
+            $total = (int)($pool['total_addresses'] ?? 0);
+            if ($used >= $total) {
+                $errors[] = 'Pool exhausted: ' . ($pool['name'] ?? $body['pool_id']);
+            }
+        }
+    }
+
+    // Check device reachability if device_id provided
+    if (!empty($body['device_id'])) {
+        $device = $db->selectCollection('devices')->findOne([
+            '_id' => new \MongoDB\BSON\ObjectId($body['device_id']),
+        ]);
+        if (!$device) {
+            $errors[] = 'Device not found: ' . $body['device_id'];
+        } elseif (($device['status'] ?? '') !== 'active') {
+            $errors[] = 'Device not active: ' . ($device['name'] ?? $body['device_id']);
+        }
+    }
 
     $available = empty($errors);
 

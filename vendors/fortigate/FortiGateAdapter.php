@@ -111,105 +111,6 @@ class FortiGateAdapter extends VendorAdapter
         throw new \RuntimeException('Remove IP not directly supported on FortiGate. Update the interface configuration.');
     }
 
-    // ─── Routing ──────────────────────────────────────────────────────────────
-
-    public function getRoutes(string $family = 'ipv4'): array
-    {
-        return $this->call(function () use ($family): array {
-            $raw = $this->api->get('/cmdb/router/static');
-            return $this->parser->parseRoutes($raw);
-        });
-    }
-
-    public function addStaticRoute(string $destination, string $gateway, ?string $interface = null): bool
-    {
-        return $this->call(function () use ($destination, $gateway, $interface): bool {
-            [$dest, $mask] = $this->cidrToNetmask($destination);
-            $data = [
-                'dst'     => $dest,
-                'dst-mask'=> $mask,
-                'gateway' => $gateway,
-            ];
-            if ($interface !== null) {
-                $data['device'] = $interface;
-            }
-            $this->api->post('/cmdb/router/static', $data);
-            return true;
-        });
-    }
-
-    public function removeRoute(string $destination): bool
-    {
-        return $this->call(function () use ($destination): bool {
-            $routes = $this->api->get('/cmdb/router/static');
-            foreach ($routes as $route) {
-                $routeDest = ($route['dst'] ?? '') . '/' . $this->maskToPrefix($route['dst-mask'] ?? '0.0.0.0');
-                if ($routeDest === $destination) {
-                    $seqNum = $route['seq-num'] ?? null;
-                    if ($seqNum !== null) {
-                        $this->api->delete("/cmdb/router/static/{$seqNum}");
-                        return true;
-                    }
-                }
-            }
-            return false;
-        });
-    }
-
-    // ─── Neighbor Table ───────────────────────────────────────────────────────
-
-    public function getNeighborTable(string $protocol = 'arp'): array
-    {
-        return $this->call(function () use ($protocol): array {
-            // FortiGate ARP via monitor endpoint
-            try {
-                $endpoint = $protocol === 'ndp' ? '/system/arp-table' : '/system/arp-table';
-                $raw = $this->api->monitor($endpoint);
-                $results = $raw['results'] ?? $raw;
-                return array_map(function (array $entry): array {
-                    return [
-                        'ip'        => $entry['ip'] ?? null,
-                        'mac'       => strtoupper($entry['mac'] ?? ''),
-                        'interface' => $entry['interface'] ?? null,
-                        'dynamic'   => true,
-                    ];
-                }, is_array($results) ? $results : []);
-            } catch (\Exception) {
-                return [];
-            }
-        });
-    }
-
-    public function addStaticNeighbor(string $ip, string $mac, string $interface): bool
-    {
-        // FortiGate uses static ARP entries through configuration
-        return $this->call(function () use ($ip, $mac, $interface): bool {
-            $this->api->post('/cmdb/system/arp-table', [
-                'ip'        => $ip,
-                'mac'       => strtolower($mac),
-                'interface' => $interface,
-            ]);
-            return true;
-        });
-    }
-
-    public function removeNeighbor(string $ip): bool
-    {
-        return $this->call(function () use ($ip): bool {
-            $entries = $this->api->get('/cmdb/system/arp-table');
-            foreach ($entries as $entry) {
-                if (($entry['ip'] ?? '') === $ip) {
-                    $id = $entry['seq-num'] ?? $entry['id'] ?? null;
-                    if ($id !== null) {
-                        $this->api->delete("/cmdb/system/arp-table/{$id}");
-                        return true;
-                    }
-                }
-            }
-            return false;
-        });
-    }
-
     // ─── Firewall ─────────────────────────────────────────────────────────────
 
     /**
@@ -332,7 +233,6 @@ class FortiGateAdapter extends VendorAdapter
                 return json_encode([
                     'timestamp' => date('c'),
                     'policies'  => $this->api->get('/cmdb/firewall/policy'),
-                    'routes'    => $this->api->get('/cmdb/router/static'),
                     'addresses' => $this->api->get('/cmdb/firewall/address'),
                 ]);
             }
@@ -349,63 +249,13 @@ class FortiGateAdapter extends VendorAdapter
     public function getConfigSections(): array
     {
         return $this->call(function (): array {
-            $routes    = $this->api->get('/cmdb/router/static');
-            $policies  = $this->api->get('/cmdb/firewall/policy');
-            $arp       = [];
-            try {
-                $arpRaw = $this->api->monitor('/system/arp-table');
-                $arp    = $arpRaw['results'] ?? [];
-            } catch (\Exception) {}
-            $ifaces = $this->api->get('/cmdb/system/interface');
+            $policies = $this->api->get('/cmdb/firewall/policy');
+            $ifaces   = $this->api->get('/cmdb/system/interface');
 
             return [
-                'routes'     => $this->parser->parseRoutes($routes),
                 'firewall'   => $this->parser->parseFirewallPolicies($policies, 'ipv4'),
-                'arp'        => $arp,
                 'interfaces' => $this->parser->parseInterfaces($ifaces),
             ];
-        });
-    }
-
-    // ─── BGP / OSPF ───────────────────────────────────────────────────────────
-
-    public function getBGPSessions(): array
-    {
-        return $this->call(function (): array {
-            $raw = $this->api->monitor('/router/bgp/neighbors');
-            return $this->parser->parseBGPSessions($raw);
-        });
-    }
-
-    public function getBGPPrefixesForRange(string $cidr): array
-    {
-        return $this->call(function () use ($cidr): array {
-            // Targeted query: fetch routes and filter by CIDR overlap
-            $raw = $this->api->monitor('/router/ipv4');
-            $routes = $raw['results'] ?? [];
-            return array_values(array_filter($routes, function (array $route) use ($cidr): bool {
-                $dest = $route['ip_mask'] ?? $route['dst'] ?? '';
-                return $this->cidrOverlaps($dest, $cidr);
-            }));
-        });
-    }
-
-    public function getOSPFNeighbors(): array
-    {
-        return $this->call(function (): array {
-            try {
-                $raw = $this->api->monitor('/router/ospf/neighbors');
-                $results = $raw['results'] ?? [];
-                return array_map(function (array $entry): array {
-                    return [
-                        'neighbor_id' => $entry['neighbor_ip'] ?? null,
-                        'state'       => $entry['state'] ?? null,
-                        'interface'   => $entry['local_intf'] ?? null,
-                    ];
-                }, $results);
-            } catch (\Exception) {
-                return [];
-            }
         });
     }
 
@@ -467,37 +317,4 @@ class FortiGateAdapter extends VendorAdapter
         return strlen(rtrim(sprintf('%032b', $long), '0'));
     }
 
-    /**
-     * Convert a CIDR string to [network, netmask] pair.
-     * e.g. "10.0.0.0/8" → ["10.0.0.0", "255.0.0.0"]
-     */
-    private function cidrToNetmask(string $cidr): array
-    {
-        [$network, $prefix] = explode('/', $cidr . '/32', 2);
-        $prefix  = (int)$prefix;
-        $long    = $prefix > 0 ? (0xFFFFFFFF << (32 - $prefix)) & 0xFFFFFFFF : 0;
-        return [$network, long2ip($long)];
-    }
-
-    /**
-     * Check if two CIDR ranges overlap.
-     */
-    private function cidrOverlaps(string $a, string $b): bool
-    {
-        try {
-            [$aIp, $aPfx] = explode('/', $a . '/32', 2);
-            [$bIp, $bPfx] = explode('/', $b . '/32', 2);
-            $aNet  = ip2long($aIp);
-            $bNet  = ip2long($bIp);
-            if ($aNet === false || $bNet === false) {
-                return false;
-            }
-            $aMask = (int)$aPfx > 0 ? (0xFFFFFFFF << (32 - (int)$aPfx)) & 0xFFFFFFFF : 0;
-            $bMask = (int)$bPfx > 0 ? (0xFFFFFFFF << (32 - (int)$bPfx)) & 0xFFFFFFFF : 0;
-            return ($aNet & $bMask) === ($bNet & $bMask)
-                || ($bNet & $aMask) === ($aNet & $aMask);
-        } catch (\Throwable) {
-            return false;
-        }
-    }
 }

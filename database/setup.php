@@ -57,19 +57,6 @@ $db->firewall_address_objects->createIndex(['name' => 1, 'device_id' => 1], ['na
 $db->firewall_address_groups->createIndex(['name' => 1, 'device_id' => 1], ['name' => 'name_device']);
 $db->firewall_service_objects->createIndex(['name' => 1], ['name' => 'name']);
 
-// ─── Routes ─────────────────────────────────────────────────────────────────────
-$db->static_routes->createIndex(['device_id' => 1, 'destination' => 1], ['unique' => true, 'name' => 'device_destination_unique']);
-$db->static_routes->createIndex(['cluster_id' => 1, 'destination' => 1], ['name' => 'cluster_destination']);
-$db->static_routes->createIndex(['ip_version' => 1], ['name' => 'ip_version']);
-$db->route_history->createIndex(['route_id' => 1, 'changed_at' => -1], ['name' => 'route_history']);
-$db->bgp_sessions->createIndex(['device_id' => 1], ['name' => 'device_id']);
-$db->bgp_sessions->createIndex(['neighbor_ip' => 1], ['name' => 'neighbor_ip']);
-
-// ─── Neighbors (ARP + NDP) ──────────────────────────────────────────────────────
-$db->neighbor_entries->createIndex(['device_id' => 1, 'ip_address' => 1], ['unique' => true, 'name' => 'device_ip_unique']);
-$db->neighbor_entries->createIndex(['protocol' => 1], ['name' => 'protocol']);
-$db->mac_address_registry->createIndex(['mac_address' => 1], ['unique' => true, 'name' => 'mac_unique']);
-
 // ─── Physical Infrastructure ────────────────────────────────────────────────────
 $db->sites->createIndex(['code' => 1], ['unique' => true, 'name' => 'code_unique']);
 $db->sites->createIndex(['address.coordinates' => '2dsphere'], ['name' => 'coordinates_2dsphere']);
@@ -90,13 +77,6 @@ $db->audit_logs->createIndex(['user_id' => 1, 'timestamp' => -1], ['name' => 'us
 $db->audit_logs->createIndex(['resource_type' => 1, 'resource_id' => 1], ['name' => 'resource']);
 $db->audit_logs->createIndex(['expires_at' => 1], ['expireAfterSeconds' => 0, 'name' => 'ttl_expiry']);
 $db->audit_logs->createIndex(['idempotency_key' => 1], ['sparse' => true, 'name' => 'idempotency_key']);
-
-// ─── Provisioning ────────────────────────────────────────────────────────────────
-$db->provisioning_jobs->createIndex(['idempotency_key' => 1], ['unique' => true, 'sparse' => true, 'name' => 'idempotency_key_unique']);
-$db->provisioning_jobs->createIndex(['server_id' => 1], ['name' => 'server_id']);
-$db->provisioning_jobs->createIndex(['status' => 1], ['name' => 'status']);
-$db->provisioning_steps->createIndex(['job_id' => 1, 'step_order' => 1], ['name' => 'job_step_order']);
-$db->manual_intervention_queue->createIndex(['status' => 1], ['name' => 'status']);
 
 // ─── NICs ────────────────────────────────────────────────────────────────────────
 $db->server_nics->createIndex(['ims_server_id' => 1], ['name' => 'ims_server_id']);

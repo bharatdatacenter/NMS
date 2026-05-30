@@ -116,90 +116,6 @@ class MikroTikAdapter extends VendorAdapter
         });
     }
 
-    // ─── Routing ──────────────────────────────────────────────────────────────
-
-    public function getRoutes(string $family = 'ipv4'): array
-    {
-        return $this->call(function () use ($family): array {
-            $endpoint = $family === 'ipv6' ? '/ipv6/route' : '/ip/route';
-            $raw = $this->api->get($endpoint);
-            return $this->parser->parseRoutes($raw);
-        });
-    }
-
-    public function addStaticRoute(string $destination, string $gateway, ?string $interface = null): bool
-    {
-        return $this->call(function () use ($destination, $gateway, $interface): bool {
-            $endpoint = str_contains($destination, ':') ? '/ipv6/route' : '/ip/route';
-            $data = [
-                'dst-address' => $destination,
-                'gateway'     => $gateway,
-            ];
-            $this->api->put($endpoint, $data);
-            return true;
-        });
-    }
-
-    public function removeRoute(string $destination): bool
-    {
-        return $this->call(function () use ($destination): bool {
-            $endpoint = str_contains($destination, ':') ? '/ipv6/route' : '/ip/route';
-            $entries = $this->api->get($endpoint);
-            foreach ($entries as $entry) {
-                if (($entry['dst-address'] ?? '') === $destination) {
-                    $id = $entry['.id'] ?? null;
-                    if ($id) {
-                        $this->api->delete("{$endpoint}/{$id}");
-                        return true;
-                    }
-                }
-            }
-            return false;
-        });
-    }
-
-    // ─── Neighbor Table ───────────────────────────────────────────────────────
-
-    public function getNeighborTable(string $protocol = 'arp'): array
-    {
-        return $this->call(function () use ($protocol): array {
-            $endpoint = $protocol === 'ndp' ? '/ipv6/neighbor' : '/ip/arp';
-            $raw = $this->api->get($endpoint);
-            return $this->parser->parseNeighborTable($raw);
-        });
-    }
-
-    public function addStaticNeighbor(string $ip, string $mac, string $interface): bool
-    {
-        return $this->call(function () use ($ip, $mac, $interface): bool {
-            $endpoint = str_contains($ip, ':') ? '/ipv6/neighbor' : '/ip/arp';
-            $this->api->put($endpoint, [
-                'address'     => $ip,
-                'mac-address' => $mac,
-                'interface'   => $interface,
-            ]);
-            return true;
-        });
-    }
-
-    public function removeNeighbor(string $ip): bool
-    {
-        return $this->call(function () use ($ip): bool {
-            $endpoint = str_contains($ip, ':') ? '/ipv6/neighbor' : '/ip/arp';
-            $entries = $this->api->get($endpoint);
-            foreach ($entries as $entry) {
-                if (($entry['address'] ?? '') === $ip) {
-                    $id = $entry['.id'] ?? null;
-                    if ($id) {
-                        $this->api->delete("{$endpoint}/{$id}");
-                        return true;
-                    }
-                }
-            }
-            return false;
-        });
-    }
-
     // ─── Firewall ─────────────────────────────────────────────────────────────
 
     public function getFirewallRules(): array
@@ -294,12 +210,10 @@ class MikroTikAdapter extends VendorAdapter
                 return is_string($result) ? $result : json_encode($result);
             } catch (\Exception) {
                 // Fallback: collect key config sections
-                $routes    = json_encode($this->api->get('/ip/route'));
                 $addresses = json_encode($this->api->get('/ip/address'));
                 $firewall  = json_encode($this->api->get('/ip/firewall/filter'));
                 return json_encode([
                     'timestamp' => date('c'),
-                    'routes'    => json_decode($routes, true),
                     'addresses' => json_decode($addresses, true),
                     'firewall'  => json_decode($firewall, true),
                 ]);
@@ -318,62 +232,13 @@ class MikroTikAdapter extends VendorAdapter
     public function getConfigSections(): array
     {
         return $this->call(function (): array {
-            $routes    = $this->api->get('/ip/route');
-            $firewall  = $this->api->get('/ip/firewall/filter');
-            $arp       = $this->api->get('/ip/arp');
-            $ifaces    = $this->api->get('/interface');
+            $firewall = $this->api->get('/ip/firewall/filter');
+            $ifaces   = $this->api->get('/interface');
 
             return [
-                'routes'     => $this->parser->parseRoutes($routes),
                 'firewall'   => $this->parser->parseFirewallRules($firewall),
-                'arp'        => $this->parser->parseNeighborTable($arp),
                 'interfaces' => $this->parser->parseInterfaces($ifaces),
             ];
-        });
-    }
-
-    // ─── BGP / OSPF ───────────────────────────────────────────────────────────
-
-    public function getBGPSessions(): array
-    {
-        return $this->call(function (): array {
-            $raw = $this->api->get('/routing/bgp/peer');
-            return $this->parser->parseBGPSessions($raw);
-        });
-    }
-
-    public function getBGPPrefixesForRange(string $cidr): array
-    {
-        return $this->call(function () use ($cidr): array {
-            // MikroTik: query routing table for prefixes overlapping the CIDR
-            $routes = $this->api->get('/ip/route');
-            $parsed = $this->parser->parseRoutes($routes);
-
-            // Filter to routes whose destination overlaps $cidr
-            return array_values(array_filter($parsed, function (array $route) use ($cidr): bool {
-                return $this->routeOverlapsCidr($route['destination'] ?? '', $cidr);
-            }));
-        });
-    }
-
-    public function getOSPFNeighbors(): array
-    {
-        return $this->call(function (): array {
-            try {
-                $raw = $this->api->get('/routing/ospf/neighbor');
-                return array_map(function (array $entry): array {
-                    return [
-                        'id'        => $entry['.id'] ?? null,
-                        'address'   => $entry['address'] ?? null,
-                        'interface' => $entry['interface'] ?? null,
-                        'state'     => $entry['state'] ?? null,
-                        'priority'  => (int)($entry['priority'] ?? 0),
-                        'router_id' => $entry['router-id'] ?? null,
-                    ];
-                }, $raw);
-            } catch (\Exception) {
-                return []; // OSPF may not be configured
-            }
         });
     }
 
@@ -426,35 +291,4 @@ class MikroTikAdapter extends VendorAdapter
         return self::ALLOWED_COMMANDS;
     }
 
-    // ─── Helpers ──────────────────────────────────────────────────────────────
-
-    /**
-     * Check if a route destination overlaps with a given CIDR.
-     * Simplified check — covers exact match and subnet containment.
-     */
-    private function routeOverlapsCidr(string $destination, string $cidr): bool
-    {
-        if (empty($destination) || empty($cidr)) {
-            return false;
-        }
-        try {
-            [$destIp, $destPfx] = $this->parser->splitCidr($destination);
-            [$cidrIp, $cidrPfx] = $this->parser->splitCidr($cidr);
-
-            $destNet  = ip2long($destIp);
-            $cidrNet  = ip2long($cidrIp);
-            if ($destNet === false || $cidrNet === false) {
-                return false; // IPv6 — skip for now
-            }
-
-            $destMask = $destPfx > 0 ? (0xFFFFFFFF << (32 - $destPfx)) & 0xFFFFFFFF : 0;
-            $cidrMask = $cidrPfx > 0 ? (0xFFFFFFFF << (32 - $cidrPfx)) & 0xFFFFFFFF : 0;
-
-            // Overlap if either network contains the other's starting address
-            return ($destNet & $cidrMask) === ($cidrNet & $cidrMask)
-                || ($cidrNet & $destMask) === ($destNet & $destMask);
-        } catch (\Throwable) {
-            return false;
-        }
-    }
 }

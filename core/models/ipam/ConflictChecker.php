@@ -59,7 +59,7 @@ class ConflictChecker
      * Calls adapter->getBGPPrefixesForRange() — a targeted query, not a full table dump.
      *
      * Returns array of conflicting prefix strings (empty array = no conflict).
-     * Failure to query the device (unsupported adapter, timeout) returns empty — does not block provisioning.
+     * Failure to query the device (unsupported adapter, timeout) returns empty — does not block the caller.
      */
     public function checkBGPConflict(string $cidr, DeviceInterface $adapter): array
     {

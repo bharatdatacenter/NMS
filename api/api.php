@@ -130,25 +130,6 @@ $routes = [
     'GET /firewall/vips'                  => ['handler' => 'firewall/vips/ListHandler',       'auth' => true, 'permission' => 'nms.firewall.read'],
     'POST /firewall/vips'                 => ['handler' => 'firewall/vips/CreateHandler',     'auth' => true, 'permission' => 'nms.firewall.write'],
 
-    // Routes
-    'GET /routes'                   => ['handler' => 'routes/ListHandler',       'auth' => true, 'permission' => 'nms.route.read'],
-    'POST /routes'                  => ['handler' => 'routes/CreateHandler',     'auth' => true, 'permission' => 'nms.route.write'],
-    'GET /routes/{id}'              => ['handler' => 'routes/ShowHandler',       'auth' => true, 'permission' => 'nms.route.read'],
-    'DELETE /routes/{id}'           => ['handler' => 'routes/DeleteHandler',     'auth' => true, 'permission' => 'nms.route.write'],
-    'POST /routes/{id}/sync'        => ['handler' => 'routes/SyncHandler',       'auth' => true, 'permission' => 'nms.route.sync'],
-    'GET /routes/device/{device_id}'=> ['handler' => 'routes/DeviceRoutesHandler','auth' => true, 'permission' => 'nms.route.read'],
-    'GET /routing/bgp/sessions'     => ['handler' => 'routing/BGPSessionsHandler','auth' => true, 'permission' => 'nms.route.read'],
-    'GET /routing/bgp/sessions/{device_id}' => ['handler' => 'routing/BGPDeviceHandler','auth' => true, 'permission' => 'nms.route.read'],
-    'GET /routing/bgp/conflicts'    => ['handler' => 'routing/BGPConflictsHandler','auth' => true, 'permission' => 'nms.route.read'],
-    'GET /routing/ospf/neighbors'   => ['handler' => 'routing/OSPFHandler',     'auth' => true, 'permission' => 'nms.route.read'],
-
-    // Neighbors (ARP + NDP)
-    'GET /neighbors'                    => ['handler' => 'neighbors/ListHandler',         'auth' => true, 'permission' => 'nms.route.read'],
-    'POST /neighbors'                   => ['handler' => 'neighbors/CreateHandler',       'auth' => true, 'permission' => 'nms.route.write'],
-    'DELETE /neighbors/{id}'            => ['handler' => 'neighbors/DeleteHandler',       'auth' => true, 'permission' => 'nms.route.write'],
-    'GET /neighbors/device/{device_id}' => ['handler' => 'neighbors/DeviceNeighborsHandler','auth' => true, 'permission' => 'nms.route.read'],
-    'POST /neighbors/sync'              => ['handler' => 'neighbors/SyncHandler',         'auth' => true, 'permission' => 'nms.route.sync'],
-
     // Sites
     'GET /sites'              => ['handler' => 'infrastructure/sites/ListHandler',  'auth' => true, 'permission' => 'nms.device.read'],
     'POST /sites'             => ['handler' => 'infrastructure/sites/CreateHandler','auth' => true, 'permission' => 'nms.device.write'],
@@ -201,15 +182,6 @@ $routes = [
     'GET /audit/logs/export'      => ['handler' => 'audit/LogsExportHandler', 'auth' => true, 'permission' => 'nms.audit.export'],
     'GET /audit/changes/{resource}'=> ['handler' => 'audit/ChangesHandler',   'auth' => true, 'permission' => 'nms.audit.read'],
 
-    // Provisioning
-    'POST /provision/server'                => ['handler' => 'provision/ProvisionHandler',          'auth' => true, 'permission' => 'nms.provision.execute', 'idempotent' => true],
-    'POST /provision/deprovision'           => ['handler' => 'provision/DeprovisionHandler',        'auth' => true, 'permission' => 'nms.provision.execute', 'idempotent' => true],
-    'POST /provision/jobs/{id}/compensate'  => ['handler' => 'provision/CompensateHandler',         'auth' => true, 'permission' => 'nms.provision.rollback'],
-    'GET /provision/jobs'                   => ['handler' => 'provision/JobsHandler',               'auth' => true, 'permission' => 'nms.provision.execute'],
-    'GET /provision/jobs/{id}'              => ['handler' => 'provision/JobShowHandler',            'auth' => true, 'permission' => 'nms.provision.execute'],
-    'GET /provision/manual-queue'           => ['handler' => 'provision/ManualQueueHandler',        'auth' => true, 'permission' => 'nms.provision.rollback'],
-    'PUT /provision/manual-queue/{id}/resolve'=> ['handler' => 'provision/ManualQueueResolveHandler','auth' => true, 'permission' => 'nms.provision.rollback'],
-
     // NICs
     'GET /nics'                         => ['handler' => 'nics/ListHandler',         'auth' => true, 'permission' => 'nms.nic.read'],
     'GET /nics/{id}'                    => ['handler' => 'nics/ShowHandler',         'auth' => true, 'permission' => 'nms.nic.read'],
@@ -219,8 +191,6 @@ $routes = [
     'POST /nics/sync/{ims_server_id}'   => ['handler' => 'nics/SyncHandler',        'auth' => true, 'permission' => 'nms.nic.write'],
 
     // IMS Integration
-    'POST /integration/ims/provision-network'    => ['handler' => 'integration/ims/ProvisionNetworkHandler',   'auth' => true, 'permission' => 'nms.provision.execute'],
-    'POST /integration/ims/deprovision-network'  => ['handler' => 'integration/ims/DeprovisionNetworkHandler', 'auth' => true, 'permission' => 'nms.provision.execute'],
     'GET /integration/ims/server/{id}/network'   => ['handler' => 'integration/ims/ServerNetworkHandler',      'auth' => true, 'permission' => 'nms.device.read'],
     'GET /integration/ims/server/{id}/connections'=> ['handler' => 'integration/ims/ServerConnectionsHandler', 'auth' => true, 'permission' => 'nms.device.read'],
     'POST /integration/ims/validate-availability' => ['handler' => 'integration/ims/ValidateAvailabilityHandler','auth' => true, 'permission' => 'nms.ipam.read'],

@@ -26,20 +26,6 @@ interface DeviceInterface
     public function addIpAddress(string $ip, string $interface): bool;
     public function removeIpAddress(string $ip): bool;
 
-    // ─── Routing ──────────────────────────────────────────────────────────────
-
-    /** @param string $family 'ipv4' | 'ipv6' */
-    public function getRoutes(string $family = 'ipv4'): array;
-    public function addStaticRoute(string $destination, string $gateway, ?string $interface = null): bool;
-    public function removeRoute(string $destination): bool;
-
-    // ─── Neighbor Table (ARP for IPv4, NDP for IPv6) ─────────────────────────
-
-    /** @param string $protocol 'arp' | 'ndp' */
-    public function getNeighborTable(string $protocol = 'arp'): array;
-    public function addStaticNeighbor(string $ip, string $mac, string $interface): bool;
-    public function removeNeighbor(string $ip): bool;
-
     // ─── Firewall ─────────────────────────────────────────────────────────────
 
     public function getFirewallRules(): array;
@@ -65,20 +51,9 @@ interface DeviceInterface
      * NOT raw config text — avoids issues with dynamic state (uptime counters,
      * encrypted password salts, byte counters, last-login timestamps).
      *
-     * @return array ['routes' => [...], 'firewall' => [...], 'arp' => [...], 'interfaces' => [...]]
+     * @return array ['firewall' => [...], 'interfaces' => [...]]
      */
     public function getConfigSections(): array;
-
-    // ─── Dynamic Routing (read-only monitoring) ───────────────────────────────
-
-    public function getBGPSessions(): array;
-
-    /**
-     * Targeted query: only prefixes overlapping this CIDR.
-     * Does NOT dump full BGP table — avoids performance issues on large tables.
-     */
-    public function getBGPPrefixesForRange(string $cidr): array;
-    public function getOSPFNeighbors(): array;
 
     // ─── HA Cluster ───────────────────────────────────────────────────────────
 
